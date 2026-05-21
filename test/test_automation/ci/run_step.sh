@@ -89,6 +89,19 @@ case "$1" in
 	      -DDCA_WITH_TESTS_FAST=1 \
               ${GITHUB_WORKSPACE}
       ;;
+      *"LLVM21-MPI-Real-CPU-Fast"*)
+        echo 'Configure for CPU-only build with LLVM/Clang and MPI'
+        cmake -GNinja \
+              -DCMAKE_C_COMPILER=mpicc \
+              -DCMAKE_CXX_COMPILER=mpic++ \
+              -DDCA_WITH_MPI=1 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DTEST_RUNNER="mpiexec" \
+              -DMPIEXEC_NUMPROC_FLAG="-n" \
+              -DMPIEXEC_PREFLAGS="-mca btl self,tcp" \
+              -DDCA_WITH_TESTS_FAST=1 \
+              ${GITHUB_WORKSPACE}
+      ;;
     esac
     ;;
 
