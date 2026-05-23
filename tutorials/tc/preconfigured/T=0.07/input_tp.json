@@ -64,8 +64,8 @@
         "measurements": 100000,
 
         "threaded-solver": {
-            "walkers": 3,
-            "accumulators": 3,
+            "walkers": 6,
+            "accumulators": 6,
             "shared-walk-and-accumulation-thread": true
         }
     },
