@@ -1,11 +1,10 @@
 #!/bin/bash
 
-# Run analysis on a local workstation (no scheduler, single process).
-# NOTE: Do not use mpiexec/multi-process with the threaded solver; a code bug
-# causes incorrect density measurements when MPI is combined with
-# shared-walk-and-accumulation-thread.
+# Run analysis on a local workstation (no scheduler) using MPI.
+# The threaded solver is configured for 1 walker + 1 accumulator per MPI rank.
 
-RUN_DCA="../../applications/analysis/main_analysis"
+RUNNER="mpiexec -n 4"
+RUN_DCA="${RUNNER} ../../applications/analysis/main_analysis"
 
 date
 
