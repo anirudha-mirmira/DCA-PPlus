@@ -332,7 +332,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::integrate() {
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkw(double weight) {
   collect_measurements();
-  accumulateGkwfromMrw(data_.G_k_w);
+  accumulateGkwFromMrw(data_.accumulated_G_k_w, weight);
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
@@ -703,7 +703,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
   for (int k_ind = 0; k_ind < KDmn::dmn_size(); k_ind++) {
     for (int w_ind = 0; w_ind < w::dmn_size(); w_ind++) {
       // These views make strong assumptions about the function layouts!
-      const MatrixView G0_matrix(&data_.mutable_G0_k_w_cluster_excluded(0, 0, 0, 0, k_ind, w_ind),
+      const MatrixView G0_matrix(&data_.G0_k_w_cluster_excluded(0, 0, 0, 0, k_ind, w_ind),
                                  matrix_size);
       const MatrixView M_matrix(&M_k_w(0, 0, 0, 0, k_ind, w_ind), matrix_size);
 
@@ -721,7 +721,11 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
           G_matrix(i, j) = -G_matrix(i, j) / parameters_.get_beta() + G0_matrix(i, j);
     }
   }
-  data_.accumulated_G_k_w += G_k_w * weight;
+  //data_.accumulated_G_k_w += G_k_w * weight;
+  //AM
+
+  G_k_w *= weight;
+  data_.accumulated_G_k_w += G_k_w;
   // This seems pretty dicey to me I think with the disorder some
   // symmetry is only guaranteed if enough disorder configurations are
   // summed over.

@@ -309,6 +309,8 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
       MOMS.makeDisorderedG0(DCA_info_struct.disorder_configurations[id]);
       std::cout << "Solving disorder configuration " << id << '\n';
       solve_cluster_problem(dca_iteration_);
+      //AM
+      //monte_carlo_integrator_.accumulateGkw(DCA_info_struct.disorder_weights[id]);
     }
     averageGkw();
   }
