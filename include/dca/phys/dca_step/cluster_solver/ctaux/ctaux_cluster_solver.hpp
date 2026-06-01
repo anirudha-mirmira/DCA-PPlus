@@ -95,6 +95,7 @@ protected:
   using NuDmn = typename DDA::NuDmn;
   using NuNuKClusterWDmn = func::dmn_variadic<nu, nu, KDmn, w>;
   using NuNuRClusterWDmn = func::dmn_variadic<nu, nu, RDmn, w>;
+  using NuRNuRClusterWDmn = func::dmn_variadic<nu, RDmn, nu, RDmn, w>;
 
 public:
   CtauxClusterSolver(Parameters& parameters_ref, Data& MOMS_ref,
@@ -196,6 +197,10 @@ private:
   FPScalar accumulated_sign_;
   func::function<std::complex<Real>, NuNuRClusterWDmn> M_r_w_;
   func::function<std::complex<Real>, NuNuRClusterWDmn> M_r_w_squared_;
+#ifdef DISORDERED_G0
+  func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_r_w_;
+  func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_r_w_squared_;
+#endif
 
   bool averaged_;
   bool compute_jack_knife_;
@@ -227,6 +232,10 @@ CtauxClusterSolver<device_t, Parameters, Data, DIST>::CtauxClusterSolver(
 
       M_r_w_("M_r_w"),
       M_r_w_squared_("M_r_w_squared"),
+#ifdef DISORDERED_G0
+      M_r_r_w_("M_r_r_w"),
+      M_r_r_w_squared_("M_r_r_w_squared"),
+#endif
       averaged_(false),
       writer_(writer) {
   if (concurrency_.id() == concurrency_.first())
@@ -463,12 +472,22 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeErrorBars() {
     std::cout << "\n\t\t compute-error-bars on Self-energy\t" << dca::util::print_time() << "\n\n";
 
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
-
-  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new("M_r_w_new");
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
 
   accumulator_.finalize();
 
+#ifdef DISORDERED_G0
+  func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_w_new("M_r_w_new");
+  M_r_w_new = accumulator_.get_sign_times_M_r_w();
+  M_r_w_new /= static_cast<typename decltype(M_r_w_new)::this_scalar_type>(
+      accumulator_.get_accumulated_phase());
+#ifdef TWO_K_DISORDER
+  // TODO: disorder-average M_r_w_new, compute G_r_w, Fourier transform
+  // M_r_w_new -> M_k_w_new and G_r_w -> G_k_w_new, then fall through to
+  // compute_G_k_w_new, compute_S_k_w_new, and stddev calls below.
+#endif  // TWO_K_DISORDER
+#else
+  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new("M_r_w_new");
   M_r_w_new = accumulator_.get_sign_times_M_r_w();
   M_r_w_new /= static_cast<typename decltype(M_r_w_new)::this_scalar_type>(
       accumulator_.get_accumulated_phase());
@@ -480,6 +499,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeErrorBars() {
 
   concurrency_.average_and_compute_stddev(Sigma_new_, data_.get_Sigma_stdv());
   concurrency_.average_and_compute_stddev(G_k_w_new, data_.get_G_k_w_stdv());
+#endif  // DISORDERED_G0
 
   // sum G4
   if (accumulator_.perform_tp_accumulation()) {
@@ -520,6 +540,17 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
     concurrency_.delayedSum(accumulator_.get_Gflop());
     accumulated_sign_ = accumulator_.get_accumulated_phase();
     collect_delayed(accumulated_sign_);
+#ifdef DISORDERED_G0
+    static_assert(
+        std::is_same_v<decltype(M_r_r_w_), std::decay_t<decltype(accumulator_.get_sign_times_M_r_w())>>);
+    M_r_r_w_ = accumulator_.get_sign_times_M_r_w();
+    collect_delayed(M_r_r_w_);
+
+    if (accumulator_.compute_std_deviation()) {
+      M_r_r_w_squared_ = accumulator_.get_sign_times_M_r_w_sqr();
+      concurrency_.delayedSum(M_r_r_w_squared_);
+    }
+#else
     static_assert(
         std::is_same_v<decltype(M_r_w_), std::decay_t<decltype(accumulator_.get_sign_times_M_r_w())>>);
     M_r_w_ = accumulator_.get_sign_times_M_r_w();
@@ -529,6 +560,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
       M_r_w_squared_ = accumulator_.get_sign_times_M_r_w_sqr();
       concurrency_.delayedSum(M_r_w_squared_);
     }
+#endif
 
     if (accumulator_.perform_equal_time_accumulation()) {
       Profiler profiler("Additional time measurements.", "QMC-collectives", __LINE__);
@@ -568,9 +600,15 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
     concurrency_.resolveSums();
   }
 
+#ifdef DISORDERED_G0
+  M_r_r_w_ /= static_cast<typename decltype(M_r_r_w_)::this_scalar_type>(accumulated_sign_);
+  M_r_r_w_squared_ /=
+      static_cast<typename decltype(M_r_r_w_squared_)::this_scalar_type>(accumulated_sign_);
+#else
   M_r_w_ /= static_cast<typename decltype(M_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_w_squared_ /=
       static_cast<typename decltype(M_r_w_squared_)::this_scalar_type>(accumulated_sign_);
+#endif
   if (accumulator_.perform_tp_accumulation()) {
     for (auto& G4 : data_.get_G4())
       G4 /= static_cast<typename std::remove_reference<decltype(G4)>::type::this_scalar_type>(
@@ -620,8 +658,14 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::symmetrize_measuremen
   if (concurrency_.id() == concurrency_.first())
     std::cout << "\n\t\t symmetrize measurements has started \t" << dca::util::print_time() << "\n";
 
+#ifdef DISORDERED_G0
+  // Symmetrize has no overload for the two-site <nu,R,nu,R,w> domain of M_r_r_w_.
+  // Crystal symmetry is only guaranteed after averaging over sufficiently many
+  // disorder configurations, so symmetrization is deferred until that path is implemented.
+#else
   Symmetrize<Parameters>::execute(M_r_w_, data_.H_symmetry);
   Symmetrize<Parameters>::execute(M_r_w_squared_, data_.H_symmetry);
+#endif
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
@@ -653,6 +697,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeG_k_w(
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::compute_G_k_w_from_M_r_w() {
+#ifndef TWO_K_DISORDER
   func::function<std::complex<double>, NuNuKClusterWDmn> M_k_w;
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_, M_k_w);
 
@@ -684,12 +729,14 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::compute_G_k_w_from_M_
   }
 
   Symmetrize<Parameters>::execute(data_.G_k_w, data_.H_symmetry);
+#endif  // TWO_K_DISORDER
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
     func::function<std::complex<Real>, func::dmn_variadic<NuDmn, NuDmn, KDmn, WDmn>>& G_k_w,
     double weight) {
+#ifndef TWO_K_DISORDER
   func::function<std::complex<double>, NuNuKClusterWDmn> M_k_w;
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_, M_k_w);
 
@@ -730,6 +777,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
   // symmetry is only guaranteed if enough disorder configurations are
   // summed over.
   // Symmetrize<Parameters>::execute(data_.G_k_w, data_.H_symmetry);
+#endif  // TWO_K_DISORDER
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
@@ -996,14 +1044,21 @@ auto CtauxClusterSolver<device_t, Parameters, Data, DIST>::local_G_k_w() const {
 
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
+#ifdef DISORDERED_G0
+  func::function<std::complex<double>, NuRNuRClusterWDmn> M_r_w_new(
+      accumulator_.get_sign_times_M_r_w(), "M_r_w_new");
+#else
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new(
       accumulator_.get_sign_times_M_r_w(), "M_r_w_new");
+#endif
 
   M_r_w_new /= accumulator_.get_accumulated_sign();
 
+#ifndef TWO_K_DISORDER
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_new, M_k_w_new);
 
   compute_G_k_w_new(M_k_w_new, G_k_w_new);
+#endif  // TWO_K_DISORDER
 
   return G_k_w_new;
 }
