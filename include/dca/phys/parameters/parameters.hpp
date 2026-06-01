@@ -281,6 +281,7 @@ void Parameters<Concurrency, Threading, Profiler, Model, RandomNumberGenerator, 
     read_obj.open_file(filename);
     this->readWrite(read_obj);
     read_obj.close_file();
+    OutputParameters::validate();
   }
 }
 
