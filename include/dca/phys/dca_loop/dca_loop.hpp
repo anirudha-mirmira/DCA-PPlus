@@ -307,7 +307,8 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
     int num_configurations = DCA_info_struct.disorder_configurations.size();
     for (int id = 0; id < num_configurations; ++id) {
       MOMS.makeDisorderedG0(DCA_info_struct.disorder_configurations[id]);
-      std::cout << "Solving disorder configuration " << id << '\n';
+      if (concurrency.id() == concurrency.first())
+        std::cout << "Solving disorder configuration " << id << '\n';
       solve_cluster_problem(dca_iteration_);
       //AM
       //monte_carlo_integrator_.accumulateGkw(DCA_info_struct.disorder_weights[id]);
@@ -395,7 +396,7 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::adjust_impuri
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::perform_cluster_exclusion_step() {
   if (concurrency.id() == concurrency.first())
-    std::cout << "\n\t\t cluster-exclusion-step " << dca::util::print_time();
+    std::cout << "\n\t\t cluster-exclusion-step " << dca::util::print_time() << std::endl;
 
   profiler_type profiler("cluster-exclusion-step", "DCA", __LINE__);
 
@@ -432,8 +433,9 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::averageGkw() 
   auto& disorder_weights = DCA_info_struct.disorder_weights;
   auto total_disorder_weight = std::accumulate(disorder_weights.begin(), disorder_weights.end(), 0.0);
   MOMS.G_k_w /= total_disorder_weight;
-  std::cout << " Averaged over " << disorder_weights.size()
-            << " disorder configurations with weight " << total_disorder_weight << '\n';
+  if (concurrency.id() == concurrency.first())
+    std::cout << " Averaged over " << disorder_weights.size()
+              << " disorder configurations with weight " << total_disorder_weight << '\n';
 }
 
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>

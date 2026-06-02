@@ -485,6 +485,21 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeErrorBars() {
   // TODO: disorder-average M_r_w_new, compute G_r_w, Fourier transform
   // M_r_w_new -> M_k_w_new and G_r_w -> G_k_w_new, then fall through to
   // compute_G_k_w_new, compute_S_k_w_new, and stddev calls below.
+#else
+  // WIP: extract R1==R2 diagonal for single-R transform until TWO_K_DISORDER is implemented.
+  {
+    func::function<std::complex<Real>, NuNuRClusterWDmn> M_r_w_single("M_r_w_single");
+    for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
+      for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
+        for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
+          for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
+            M_r_w_single(nu1, nu2, R_ind, w_ind) = M_r_w_new(nu1, R_ind, nu2, R_ind, w_ind);
+    math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_single, M_k_w_new);
+    compute_G_k_w_new(M_k_w_new, G_k_w_new);
+    compute_S_k_w_new(G_k_w_new, Sigma_new_);
+    concurrency_.average_and_compute_stddev(Sigma_new_, data_.get_Sigma_stdv());
+    concurrency_.average_and_compute_stddev(G_k_w_new, data_.get_G_k_w_stdv());
+  }
 #endif  // TWO_K_DISORDER
 #else
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new("M_r_w_new");
@@ -604,6 +619,13 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
   M_r_r_w_ /= static_cast<typename decltype(M_r_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_r_w_squared_ /=
       static_cast<typename decltype(M_r_r_w_squared_)::this_scalar_type>(accumulated_sign_);
+  // WIP: copy R1==R2 diagonal of M_r_r_w_ into M_r_w_ so the single-R downstream path
+  // (compute_G_k_w_from_M_r_w, accumulateGkwFromMrw) has data until TWO_K_DISORDER is implemented.
+  for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
+    for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
+      for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
+        for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
+          M_r_w_(nu1, nu2, R_ind, w_ind) = M_r_r_w_(nu1, R_ind, nu2, R_ind, w_ind);
 #else
   M_r_w_ /= static_cast<typename decltype(M_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_w_squared_ /=
@@ -1055,8 +1077,18 @@ auto CtauxClusterSolver<device_t, Parameters, Data, DIST>::local_G_k_w() const {
   M_r_w_new /= accumulator_.get_accumulated_sign();
 
 #ifndef TWO_K_DISORDER
+#ifdef DISORDERED_G0
+  // WIP: extract R1==R2 diagonal for single-R transform until TWO_K_DISORDER is implemented.
+  func::function<std::complex<double>, NuNuRClusterWDmn> M_r_w_single("M_r_w_single");
+  for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
+    for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
+      for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
+        for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
+          M_r_w_single(nu1, nu2, R_ind, w_ind) = M_r_w_new(nu1, R_ind, nu2, R_ind, w_ind);
+  math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_single, M_k_w_new);
+#else
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_new, M_k_w_new);
-
+#endif  // DISORDERED_G0
   compute_G_k_w_new(M_k_w_new, G_k_w_new);
 #endif  // TWO_K_DISORDER
 

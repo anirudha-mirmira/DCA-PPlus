@@ -124,13 +124,22 @@ public:
       }
     }
     auto disorder_half_pot = parameters.get_disorder_potential() * 0.5;
-    for (int ic = 0; ic < disorder_configurations.size(); ++ic) {
-      auto& config = disorder_configurations[ic];
-      auto weight = disorder_weights[ic];
-      config *= disorder_half_pot;
-      config.print_elements(std::cout);
-      std::cout << "weight: " << weight << '\n';
+    for (int ic = 0; ic < disorder_configurations.size(); ++ic)
+      disorder_configurations[ic] *= disorder_half_pot;
+
+    auto& concurrency = parameters.get_concurrency();
+    for (int r = 0; r < concurrency.number_of_processors(); ++r) {
+      concurrency.barrier();
+      if (concurrency.id() == r) {
+        std::cout << "Rank " << r << " disorder configurations:\n";
+        for (int ic = 0; ic < disorder_configurations.size(); ++ic) {
+          disorder_configurations[ic].print_elements(std::cout);
+          std::cout << "weight: " << disorder_weights[ic] << '\n';
+        }
+        std::cout << std::flush;
+      }
     }
+    concurrency.barrier();
   }
 };
 }  // namespace dca::phys
