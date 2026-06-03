@@ -191,7 +191,7 @@ void SpAccumulator<Parameters, linalg::CPU>::accumulate(
         const Real t_i = config[i].get_tau();
         const int delta_r = RDmn::parameter_type::subtract(r_j, r_i);
         const Real scaled_tau = (t_i - t_j) * one_div_two_beta;  // + (i == j) * epsilon;
-#ifdef DISORDER_G0
+#ifdef DISORDERED_G0
         const int index = bbr_dmn(b_i, r_i, b_j, r_j);
 #else
         const int index = bbr_dmn(b_i, b_j, delta_r);
@@ -213,16 +213,30 @@ template <class Parameters>
 void SpAccumulator<Parameters, linalg::CPU>::finalizeFunction(MFunctionTimePair& ft_objs,
                                                               MFunction& function) {
   func::function<std::complex<Real>, func::dmn_variadic<WDmn, PDmn>> tmp("tmp");
-  const Real normalization = 1. / RDmn::dmn_size();
 
   for (int s = 0; s < 2; ++s) {
     ft_objs[s].finalize(tmp);
+#ifdef DISORDERED_G0
+    // M_single(dr) = (1/N_R) sum_R0 M_two(R0, R0+dr): the origin-average 1/N_R is deferred to averageGkw, so keep per-pair M here (norm=1).
+    const Real normalization = 1.;
+    // tmp leaves [W,B,R,B,R] (PDmn=<B,R,B,R>); function leaves [B,S,R,B,S,R,W].
+    for (int w_ind = 0; w_ind < WDmn::dmn_size(); w_ind++)
+      for (int r2_ind = 0; r2_ind < RDmn::dmn_size(); r2_ind++)
+        for (int b2_ind = 0; b2_ind < BDmn::dmn_size(); b2_ind++)
+          for (int r1_ind = 0; r1_ind < RDmn::dmn_size(); r1_ind++)
+            for (int b1_ind = 0; b1_ind < BDmn::dmn_size(); b1_ind++)
+              function(b1_ind, s, r1_ind, b2_ind, s, r2_ind, w_ind) +=
+                  tmp(w_ind, b1_ind, r1_ind, b2_ind, r2_ind) * normalization;
+#else
+    // 1/N_R averages the difference-binned M over the absolute origin (the translational average).
+    const Real normalization = 1. / RDmn::dmn_size();
     for (int w_ind = 0; w_ind < WDmn::dmn_size(); w_ind++)
       for (int r_ind = 0; r_ind < RDmn::dmn_size(); r_ind++)
         for (int b2_ind = 0; b2_ind < BDmn::dmn_size(); b2_ind++)
           for (int b1_ind = 0; b1_ind < BDmn::dmn_size(); b1_ind++)
             function(b1_ind, s, b2_ind, s, r_ind, w_ind) +=
                 tmp(w_ind, b1_ind, b2_ind, r_ind) * normalization;
+#endif
   }
 }
 
