@@ -33,6 +33,7 @@
 #include "dca/math/function_transform/function_transform.hpp"
 #include "dca/math/statistics/util.hpp"
 #include "dca/parallel/util/get_workload.hpp"
+#include "dca/phys/dca_loop/disorder/disorder_average.hpp"
 #include "dca/phys/dca_step/cluster_solver/ctaux/ctaux_accumulator.hpp"
 #include "dca/phys/dca_step/cluster_solver/ctaux/ctaux_walker.hpp"
 #include "dca/phys/dca_step/cluster_solver/shared_tools/interpolation/g0_interpolation.hpp"
@@ -152,6 +153,10 @@ private:
   // Now this needs to have k1, k2
   void accumulateGkwFromMrw(
       func::function<std::complex<Real>, func::dmn_variadic<NuDmn, NuDmn, KDmn, WDmn>>& G_k_w,
+      double weight);
+  // r-space disorder analog of accumulateGkwFromMrw: per-config Dyson into the two-r accumulator.
+  void accumulateGrrwFromMrrw(
+      func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
       double weight);
 
   double compute_S_k_w_from_G_k_w();
@@ -341,7 +346,11 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::integrate() {
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkw(double weight) {
   collect_measurements();
+#if defined(DISORDERED_G0) && defined(TWO_R_DISORDER)
+  accumulateGrrwFromMrrw(data_.disorder_G_r_r_w, weight);
+#else
   accumulateGkwFromMrw(data_.accumulated_G_k_w, weight);
+#endif
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
@@ -619,13 +628,16 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
   M_r_r_w_ /= static_cast<typename decltype(M_r_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_r_w_squared_ /=
       static_cast<typename decltype(M_r_r_w_squared_)::this_scalar_type>(accumulated_sign_);
+#ifndef TWO_R_DISORDER
   // WIP: copy R1==R2 diagonal of M_r_r_w_ into M_r_w_ so the single-R downstream path
-  // (compute_G_k_w_from_M_r_w, accumulateGkwFromMrw) has data until TWO_R_DISORDER is implemented.
+  // (compute_G_k_w_from_M_r_w, accumulateGkwFromMrw) has data. With TWO_R_DISORDER the
+  // r-space Dyson uses M_r_r_w_ directly, so M_r_w_ is unused and this copy is skipped.
   for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
     for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
       for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
         for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
           M_r_w_(nu1, nu2, R_ind, w_ind) = M_r_r_w_(nu1, R_ind, nu2, R_ind, w_ind);
+#endif  // TWO_R_DISORDER
 #else
   M_r_w_ /= static_cast<typename decltype(M_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_w_squared_ /=
@@ -800,6 +812,18 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
   // summed over.
   // Symmetrize<Parameters>::execute(data_.G_k_w, data_.H_symmetry);
 #endif  // TWO_R_DISORDER
+}
+
+template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
+void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGrrwFromMrrw(
+    func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
+    double weight) {
+#if defined(DISORDERED_G0) && defined(TWO_R_DISORDER)
+  // Per-frequency Dyson G = G0_dis - G0_dis*M*G0_dis/beta on the dense (nu*N_R) two-site basis,
+  // accumulated with the config weight into G_r_r_w.
+  disorder::accumulateDisorderDyson<nu, RDmn, w, Real>(
+      data_.disordered_G0_r_r_w_cl_exl, M_r_r_w_, parameters_.get_beta(), weight, G_r_r_w);
+#endif  // DISORDERED_G0 && TWO_R_DISORDER
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>

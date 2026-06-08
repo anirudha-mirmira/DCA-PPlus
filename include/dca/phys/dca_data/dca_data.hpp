@@ -238,6 +238,9 @@ public:
   /// Disordered G0 in r-space Matsubara frequency, computed directly in makeDisorderedG0 by
   /// per-site frequency inversion. Feeds the r-space Dyson equation in accumulateGrrwFromMrrw.
   Disordered_G0_r_r_w disordered_G0_r_r_w_cl_exl;
+  /// Disorder-averaged interacting Green's function, accumulated over configs in
+  /// accumulateGrrwFromMrrw.
+  Disordered_G0_r_r_w disorder_G_r_r_w;
 
   /// Disorder realizations of the current DCA step: each configuration is the per-site random
   /// potential (box in [-W/2,W/2], binary +/-V/2), with uniform averaging weights. Generated in

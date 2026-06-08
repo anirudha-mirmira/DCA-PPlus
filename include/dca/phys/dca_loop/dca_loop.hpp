@@ -25,6 +25,7 @@
 #include "dca/io/filesystem.hpp"
 #include "dca/io/writer.hpp"
 #include "dca/io/io_types.hpp"
+#include "dca/math/function_transform/function_transform.hpp"
 #include "dca/phys/dca_algorithms/compute_greens_function.hpp"
 #include "dca/phys/dca_data/dca_data.hpp"
 #include "dca/phys/dca_loop/dca_loop_data.hpp"
@@ -41,6 +42,7 @@
 #include "dca/util/print_time.hpp"
 #include "dca/util/signal_handler.hpp"
 
+#include "dca/phys/dca_loop/disorder/disorder_average.hpp"
 #include "dca/phys/dca_loop/disorder/makeDisorderConfigurations.hpp"
 
 namespace dca {
@@ -298,6 +300,15 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::execute() {
 
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClusters() {
+#ifdef TWO_R_DISORDER
+  // TODO(pin): handle the ordered (zero-config) case better in a TWO_R_DISORDER build. The
+  // single-cluster path (collectSingle -> compute_G_k_w_from_M_r_w) is gated off here, so it
+  // cannot produce G_k_w; for now we require at least one disorder configuration.
+  if (parameters.get_disorder_num_configurations() == 0)
+    throw std::logic_error(
+        "TWO_R_DISORDER build requires disorder-num-configurations >= 1 "
+        "(the ordered single-cluster path is disabled in this build).");
+#endif
   if (parameters.get_disorder_num_configurations() > 0) {
     // additional things for summation and getting the post solve G
     // to sum will need to be done here
@@ -315,13 +326,18 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
                   << " unique disorder configurations; generated only " << num_configurations
                   << ".\n";
     }
+#ifdef TWO_R_DISORDER
+    MOMS.disorder_G_r_r_w = 0;
+    MOMS.G_k_w = 0;
+#else
+    MOMS.accumulated_G_k_w = 0;
+#endif
     for (int id = 0; id < num_configurations; ++id) {
       MOMS.makeDisorderedG0(MOMS.disorder_configurations[id]);
       if (concurrency.id() == concurrency.first())
         std::cout << "Solving disorder configuration " << id << '\n';
       solve_cluster_problem(dca_iteration_);
-      //AM
-      //monte_carlo_integrator_.accumulateGkw(MOMS.disorder_weights[id]);
+      monte_carlo_integrator_.accumulateGkw(MOMS.disorder_weights[id]);
     }
     averageGkw();
   }
@@ -439,10 +455,29 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::accumulateGkw
 
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::averageGkw() {
-  MOMS.G_k_w = MOMS.accumulated_G_k_w;
   auto& disorder_weights = MOMS.disorder_weights;
-  auto total_disorder_weight = std::accumulate(disorder_weights.begin(), disorder_weights.end(), 0.0);
+  const double total_disorder_weight =
+      std::accumulate(disorder_weights.begin(), disorder_weights.end(), 0.0);
+
+#ifdef TWO_R_DISORDER
+  using RClusterDmn = typename DcaDataType::RClusterDmn;
+  using KClusterDmn = typename DcaDataType::KClusterDmn;
+  using NuDmn = typename DcaDataType::NuDmn;
+  using WDmn = typename DcaDataType::WDmn;
+
+  // Disorder average (weighted mean) of the two-site interacting G.
+  MOMS.disorder_G_r_r_w /= total_disorder_weight;
+
+  // Translational average <nu1,R1,nu2,R2,w> -> <nu1,nu2,R,w> (restores translational symmetry).
+  disorder::translationalAverage<NuDmn, RClusterDmn, WDmn>(MOMS.disorder_G_r_r_w, MOMS.G_r_w);
+
+  // r -> k (cluster-momentum-diagonal), the same transform as the clean DCA path.
+  math::transform::FunctionTransform<RClusterDmn, KClusterDmn>::execute(MOMS.G_r_w, MOMS.G_k_w);
+#else
+  MOMS.G_k_w = MOMS.accumulated_G_k_w;
   MOMS.G_k_w /= total_disorder_weight;
+#endif
+
   if (concurrency.id() == concurrency.first())
     std::cout << " Averaged over " << disorder_weights.size()
               << " disorder configurations with weight " << total_disorder_weight << '\n';
