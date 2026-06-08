@@ -12,9 +12,11 @@
 #ifndef DCA_PHYS_DCA_LOOP_MAKE_DISORDER_HPP
 #define DCA_PHYS_DCA_LOOP_MAKE_DISORDER_HPP
 
-#include <vector>
-#include <unordered_set>
+#include <algorithm>
 #include <random>
+#include <string>
+#include <unordered_set>
+#include <vector>
 #include "dca/phys/types/dca_shared_types.hpp"
 
 namespace dca::phys {
@@ -48,89 +50,84 @@ class MakeDisorderConfigurations {
 public:
   void operator()(Parameters& parameters, std::vector<DisorderConfiguration>& disorder_configurations,
                   std::vector<double>& disorder_weights) {
-    auto m_configs = parameters.get_disorder_num_configurations();
+    const int m_configs = parameters.get_disorder_num_configurations();
     assert(m_configs > 0);
     disorder_configurations.resize(m_configs);
     disorder_weights.resize(m_configs);
 
-    auto n_bands = BDmn::dmn_size();
-    auto n_rsites = RDmn::dmn_size();
-    auto n_sites = disorder_configurations[0].size();
+    const int n_bands = BDmn::dmn_size();
+    const int n_rsites = RDmn::dmn_size();
 
-    // right now we always make spin synmmetric configurations
-    n_sites /= 2;
+    const std::string& distribution = parameters.get_disorder_distribution();
+    const double potential = parameters.get_disorder_potential();
+    const double density = parameters.get_disorder_density();
+    const bool enforce_unique = parameters.get_disorder_unique_configs();
 
-    // Check feasibility: only 2^n distinct ±1 vectors of length n exist
-    if (m_configs > (1 << n_sites)) {
-      throw std::runtime_error("More unique vectors requested than possible.");
-    }
+    const bool is_box = (distribution == "box");
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, 1);
+    // Seed from the Monte Carlo seed, shifted by a fixed offset so the disorder realizations
+    // use a stream distinct from the QMC walkers (which derive their seeds from get_seed()).
+    // The seed is read on the root rank and broadcast as part of Parameters, so it is identical
+    // on every rank (every rank generates the same disorder ensemble) and fixed for the whole
+    // run (the ensemble is the same in every DCA iteration, i.e. quenched disorder). No separate
+    // seed broadcast is needed here.
+    constexpr unsigned disorder_seed_offset = 0x9e3779b9u;  // golden ratio; arbitrary but fixed
+    std::mt19937 gen(static_cast<unsigned>(parameters.get_seed()) + disorder_seed_offset);
+    // box:    site potential ~ Uniform[-W/2, W/2], with W = potential.
+    std::uniform_real_distribution<double> box_dist(-0.5 * potential, 0.5 * potential);
+    std::uniform_real_distribution<double> unit_dist(0.0, 1.0);
 
-    // Set to track uniqueness using our custom hash
-    std::unordered_set<std::vector<int>, detail::VectorHash> seen;
-
-    // here we put the disorder potential in while preserving spin
-    // symmetry for the potential
-    auto insert_config = [n_rsites, n_bands](const auto& this_config, auto& config) {
-      int i_disorder = 0;
-      for (int isite = 0; isite < n_rsites; ++isite) {
-        for (int iband = 0; iband < n_bands; ++iband, ++i_disorder) {
-          config(iband, 0, isite) = this_config[i_disorder];
-          config(iband, 1, isite) = this_config[i_disorder];
-        }
-      }
+    // Draw one disorder value for a single (band, site):
+    //  - box:    uniform in [-W/2, W/2].
+    //  - binary: +V/2 with probability `density`, else -V/2 (V = potential).
+    auto draw_site_value = [&]() -> double {
+      if (is_box)
+        return box_dist(gen);
+      return (unit_dist(gen) < density ? 1.0 : -1.0) * 0.5 * potential;
     };
 
-    int max_ones = parameters.get_disorder_max_sites();
-    int configs_generated = 0;
+    // Uniqueness only makes sense for the discrete binary distribution; a continuous
+    // box draw is distinct with probability one.
+    const bool tracking_unique = enforce_unique && !is_box;
+    std::unordered_set<std::vector<int>, detail::VectorHash> seen;
+
+    int generated = 0;
     int attempts = 0;
-    int max_attempts = 1000;
-    // Generate vectors until we have m unique ones
-    while (configs_generated < m_configs && attempts < max_attempts) {
-      auto& config = disorder_configurations[configs_generated];
-      auto& weight = disorder_weights[configs_generated];
-      std::vector<int> this_config(n_sites);
-      int num_dis = 0;
-      for (auto& site : this_config) {
-        // Map 0 → -1 and 1 → 1
-        site = dist(gen) ? 1 : -1;
-        if (site == 1)
-          ++num_dis;
-        if (num_dis > max_ones)
-          break;
-      }
+    const int max_attempts = 1000;
+    while (generated < m_configs && attempts < max_attempts) {
+      auto& config = disorder_configurations[generated];
 
-      if (num_dis <= max_ones) {
-        // Insert returns true only if this vector is new (unique)
-        if (seen.insert(this_config).second) {
-          ++configs_generated;
-          attempts = 0;
-          insert_config(this_config, config);
-          auto conc = parameters.get_disorder_density();
-          weight = std::pow(conc, num_dis) * std::pow((1 - conc), (n_sites - num_dis));
+      std::vector<int> pattern;  // sign pattern, only populated for the uniqueness check
+      if (tracking_unique)
+        pattern.reserve(static_cast<std::size_t>(n_bands) * n_rsites);
 
-          // If disorder didn't have spin symmetry
-          // std::copy(this_config.begin(), this_config.end(), config.begin());
+      // Fill the per-(band, site) random potential, spin-symmetrically.
+      for (int isite = 0; isite < n_rsites; ++isite)
+        for (int iband = 0; iband < n_bands; ++iband) {
+          const double value = draw_site_value();
+          config(iband, 0, isite) = value;
+          config(iband, 1, isite) = value;
+          if (tracking_unique)
+            pattern.push_back(value > 0.0 ? 1 : -1);
         }
-        else {
-          ++attempts;
-        }
+
+      if (tracking_unique && !seen.insert(pattern).second) {
+        ++attempts;  // duplicate binary configuration, redraw
+        continue;
       }
-      else {
-        ++attempts;
-      }
+      ++generated;
+      attempts = 0;
     }
-    auto disorder_half_pot = parameters.get_disorder_potential() * 0.5;
-    for (int ic = 0; ic < (int)disorder_configurations.size(); ++ic) {
-      auto& config = disorder_configurations[ic];
-      auto weight = disorder_weights[ic];
-      config *= disorder_half_pot;
-      config.print_elements(std::cout);
-      std::cout << "weight: " << weight << '\n';
+    // If uniqueness was requested but the cluster is too small to supply m_configs
+    // distinct configurations, keep only the ones actually generated.
+    if (generated < m_configs) {
+      disorder_configurations.resize(generated);
+      disorder_weights.resize(generated);
     }
+
+    // Equal weight for every configuration in the disorder average.
+    const double weight = 1.0 / static_cast<double>(disorder_configurations.size());
+    std::fill(disorder_weights.begin(), disorder_weights.end(), weight);
   }
 };
 }  // namespace dca::phys

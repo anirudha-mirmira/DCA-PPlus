@@ -10,6 +10,7 @@
 #define DCA_PHYS_PARAMETERS_DISORDER_PARAMETERS_HPP
 
 #include <stdexcept>
+#include <string>
 
 namespace dca {
 namespace phys {
@@ -27,7 +28,13 @@ namespace params {
  */
 class DisorderParameters {
 public:
-  DisorderParameters() {}
+  DisorderParameters()
+      : disorder_distribution_("binary"),
+        disorder_potential_(0.0),
+        disorder_density_(0.0),
+        disorder_num_configurations_(0),
+        // disorder_max_sites_(1),
+        disorder_unique_configs_(false) {}
 
   template <typename Concurrency>
   int getBufferSize(const Concurrency& concurrency) const;
@@ -39,6 +46,9 @@ public:
   template <typename ReaderOrWriter>
   void readWrite(ReaderOrWriter& reader_or_writer);
 
+  const std::string& get_disorder_distribution() const {
+    return disorder_distribution_;
+  }
   double get_disorder_potential() const {
     return disorder_potential_;
   }
@@ -48,25 +58,32 @@ public:
   int get_disorder_num_configurations() const {
     return disorder_num_configurations_;
   }
-  int get_disorder_max_sites() const {
-    return disorder_max_sites_;
+  // int get_disorder_max_sites() const {
+  //   return disorder_max_sites_;
+  // }
+  bool get_disorder_unique_configs() const {
+    return disorder_unique_configs_;
   }
 
 private:
-  double disorder_potential_{0.0};
-  double disorder_density_{0.0};
-  int disorder_num_configurations_{0};
-  int disorder_max_sites_{1};
+  std::string disorder_distribution_;
+  double disorder_potential_;
+  double disorder_density_;
+  int disorder_num_configurations_;
+  // int disorder_max_sites_;
+  bool disorder_unique_configs_;
 };
 
 template <typename Concurrency>
 int DisorderParameters::getBufferSize(const Concurrency& concurrency) const {
   int buffer_size = 0;
 
+  buffer_size += concurrency.get_buffer_size(disorder_distribution_);
   buffer_size += concurrency.get_buffer_size(disorder_potential_);
   buffer_size += concurrency.get_buffer_size(disorder_density_);
   buffer_size += concurrency.get_buffer_size(disorder_num_configurations_);
-  buffer_size += concurrency.get_buffer_size(disorder_max_sites_);
+  // buffer_size += concurrency.get_buffer_size(disorder_max_sites_);
+  buffer_size += concurrency.get_buffer_size(disorder_unique_configs_);
 
   return buffer_size;
 }
@@ -74,19 +91,23 @@ int DisorderParameters::getBufferSize(const Concurrency& concurrency) const {
 template <typename Concurrency>
 void DisorderParameters::pack(const Concurrency& concurrency, char* buffer, int buffer_size,
                               int& position) const {
+  concurrency.pack(buffer, buffer_size, position, disorder_distribution_);
   concurrency.pack(buffer, buffer_size, position, disorder_potential_);
   concurrency.pack(buffer, buffer_size, position, disorder_density_);
   concurrency.pack(buffer, buffer_size, position, disorder_num_configurations_);
-  concurrency.pack(buffer, buffer_size, position, disorder_max_sites_);
+  // concurrency.pack(buffer, buffer_size, position, disorder_max_sites_);
+  concurrency.pack(buffer, buffer_size, position, disorder_unique_configs_);
 }
 
 template <typename Concurrency>
 void DisorderParameters::unpack(const Concurrency& concurrency, char* buffer, int buffer_size,
                                 int& position) {
+  concurrency.unpack(buffer, buffer_size, position, disorder_distribution_);
   concurrency.unpack(buffer, buffer_size, position, disorder_potential_);
   concurrency.unpack(buffer, buffer_size, position, disorder_density_);
   concurrency.unpack(buffer, buffer_size, position, disorder_num_configurations_);
-  concurrency.unpack(buffer, buffer_size, position, disorder_max_sites_);
+  // concurrency.unpack(buffer, buffer_size, position, disorder_max_sites_);
+  concurrency.unpack(buffer, buffer_size, position, disorder_unique_configs_);
 }
 
 template <typename ReaderOrWriter>
@@ -94,6 +115,11 @@ void DisorderParameters::readWrite(ReaderOrWriter& reader_or_writer) {
   try {
     reader_or_writer.open_group("disorder");
 
+    try {
+      reader_or_writer.execute("distribution", disorder_distribution_);
+    }
+    catch (const std::exception& r_e) {
+    }
     try {
       reader_or_writer.execute("potential", disorder_potential_);
     }
@@ -109,8 +135,13 @@ void DisorderParameters::readWrite(ReaderOrWriter& reader_or_writer) {
     }
     catch (const std::exception& r_e) {
     }
+    // try {
+    //   reader_or_writer.execute("max-sites", disorder_max_sites_);
+    // }
+    // catch (const std::exception& r_e) {
+    // }
     try {
-      reader_or_writer.execute("max-sites", disorder_max_sites_);
+      reader_or_writer.execute("unique-configs", disorder_unique_configs_);
     }
     catch (const std::exception& r_e) {
     }
@@ -118,6 +149,10 @@ void DisorderParameters::readWrite(ReaderOrWriter& reader_or_writer) {
   }
   catch (const std::exception& r_e) {
   }
+
+  // Check values.
+  if (!(disorder_distribution_ == "binary" || disorder_distribution_ == "box"))
+    throw std::logic_error("Illegal value for disorder distribution (expected 'binary' or 'box').");
 }
 
 }  // namespace params

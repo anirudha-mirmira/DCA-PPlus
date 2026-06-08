@@ -16,10 +16,12 @@
 TEST(DisorderParametersTest, DefaultValues) {
   dca::phys::params::DisorderParameters pars;
 
+  EXPECT_EQ("binary", pars.get_disorder_distribution());
   EXPECT_EQ(0.0, pars.get_disorder_potential());
   EXPECT_EQ(0.0, pars.get_disorder_density());
   EXPECT_EQ(0, pars.get_disorder_num_configurations());
-  EXPECT_EQ(1, pars.get_disorder_max_sites());
+  // EXPECT_EQ(1, pars.get_disorder_max_sites());
+  EXPECT_FALSE(pars.get_disorder_unique_configs());
 }
 
 TEST(DomainsParametersTest, ReadAll) {
@@ -31,8 +33,10 @@ TEST(DomainsParametersTest, ReadAll) {
   pars.readWrite(reader);
   reader.close_file();
 
+  EXPECT_EQ("box", pars.get_disorder_distribution());
   EXPECT_EQ(1.0, pars.get_disorder_potential());
   EXPECT_EQ(0.25, pars.get_disorder_density());
   EXPECT_EQ(10, pars.get_disorder_num_configurations());
-  EXPECT_EQ(1, pars.get_disorder_max_sites());
+  // EXPECT_EQ(1, pars.get_disorder_max_sites());
+  EXPECT_TRUE(pars.get_disorder_unique_configs());
 }

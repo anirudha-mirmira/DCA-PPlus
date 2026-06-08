@@ -302,16 +302,26 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
     // additional things for summation and getting the post solve G
     // to sum will need to be done here
     MakeDisorderConfigurations<ParametersType> make_disorder_configurations;
-    make_disorder_configurations(parameters, DCA_info_struct.disorder_configurations,
-                                 DCA_info_struct.disorder_weights);
-    int num_configurations = DCA_info_struct.disorder_configurations.size();
+    make_disorder_configurations(parameters, MOMS.disorder_configurations, MOMS.disorder_weights);
+    int num_configurations = MOMS.disorder_configurations.size();
+
+    if (concurrency.id() == concurrency.first()) {
+      if (parameters.get_disorder_unique_configs() &&
+          parameters.get_disorder_distribution() == "box")
+        std::cerr << "Warning: Uniqueness of configurations is checked only for binary disorder\n";
+      if (num_configurations < parameters.get_disorder_num_configurations())
+        std::cerr << "Warning: Cluster too small to generate the requested "
+                  << parameters.get_disorder_num_configurations()
+                  << " unique disorder configurations; generated only " << num_configurations
+                  << ".\n";
+    }
     for (int id = 0; id < num_configurations; ++id) {
-      MOMS.makeDisorderedG0(DCA_info_struct.disorder_configurations[id]);
+      MOMS.makeDisorderedG0(MOMS.disorder_configurations[id]);
       if (concurrency.id() == concurrency.first())
         std::cout << "Solving disorder configuration " << id << '\n';
       solve_cluster_problem(dca_iteration_);
       //AM
-      //monte_carlo_integrator_.accumulateGkw(DCA_info_struct.disorder_weights[id]);
+      //monte_carlo_integrator_.accumulateGkw(MOMS.disorder_weights[id]);
     }
     averageGkw();
   }
@@ -430,7 +440,7 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::accumulateGkw
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::averageGkw() {
   MOMS.G_k_w = MOMS.accumulated_G_k_w;
-  auto& disorder_weights = DCA_info_struct.disorder_weights;
+  auto& disorder_weights = MOMS.disorder_weights;
   auto total_disorder_weight = std::accumulate(disorder_weights.begin(), disorder_weights.end(), 0.0);
   MOMS.G_k_w /= total_disorder_weight;
   if (concurrency.id() == concurrency.first())

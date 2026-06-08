@@ -44,6 +44,7 @@
 #include "dca/phys/domains/cluster/cluster_operations.hpp"
 #include "dca/phys/domains/cluster/interpolation/hspline_interpolation/hspline_interpolation.hpp"
 #include "dca/phys/domains/cluster/momentum_exchange_domain.hpp"
+#include "dca/phys/domains/cluster/disorder_configuration_domain.hpp"
 #include "dca/phys/domains/quantum/brillouin_zone_cut_domain.hpp"
 #include "dca/phys/domains/quantum/electron_band_domain.hpp"
 #include "dca/phys/domains/quantum/electron_spin_domain.hpp"
@@ -151,7 +152,7 @@ public:
   void write(Writer& writer);
 
   template <typename Writer>
-  void writeDisorderConfiguration(Writer& writer);
+  void writeDisAvgGreensFunction(Writer& writer);
 
 #ifdef DCA_WITH_ADIOS2
   void writeDistributedG4Adios(io::ADIOS2Writer<Concurrency>& writer);
@@ -237,6 +238,12 @@ public:
   /// Disordered G0 in r-space Matsubara frequency, computed directly in makeDisorderedG0 by
   /// per-site frequency inversion. Feeds the r-space Dyson equation in accumulateGrrwFromMrrw.
   Disordered_G0_r_r_w disordered_G0_r_r_w_cl_exl;
+
+  /// Disorder realizations of the current DCA step: each configuration is the per-site random
+  /// potential (box in [-W/2,W/2], binary +/-V/2), with uniform averaging weights. Generated in
+  /// the DCA loop; written to output when the "dump-disorder-configs" parameter is set.
+  std::vector<DisorderConfiguration> disorder_configurations;
+  std::vector<double> disorder_weights;
 
   func::function<Real, NuDmn> orbital_occupancy;
 
@@ -576,12 +583,34 @@ void DcaData<Parameters, DT>::write(Writer& writer) {
     }
 #endif
   }
+
+  // Dump the disorder realizations of this DCA step (the per-site random potentials) as a
+  // single function over <nu, r, configuration index>. The disorder potential is site-local
+  // (one value per site), so a single R index is the faithful representation.
+  if (parameters_.dump_disorder_configs() && !disorder_configurations.empty()) {
+    domains::DisorderConfigurationDomain::initialize(static_cast<int>(disorder_configurations.size()));
+    using ConfigDmn = func::dmn_0<domains::DisorderConfigurationDomain>;
+    func::function<Real, func::dmn_variadic<NuDmn, RClusterDmn, ConfigDmn>> disorder_randoms(
+        "disorder_configurations");
+
+    // Each configuration is a contiguous nu*r block; copy it into the ic-th slot (the
+    // configuration index is the slowest-varying dimension of disorder_randoms).
+    const int block = disorder_configurations[0].size();
+    for (int ic = 0; ic < static_cast<int>(disorder_configurations.size()); ++ic) {
+      const Real* src = disorder_configurations[ic].values();
+      Real* dst = disorder_randoms.values() + ic * block;
+      for (int j = 0; j < block; ++j)
+        dst[j] = src[j];
+    }
+    writer.execute(disorder_randoms);
+  }
+
   writer.close_group();
 }
 
 template <class Parameters, DistType DT>
 template <typename Writer>
-void DcaData<Parameters, DT>::writeDisorderConfiguration(Writer& writer) {
+void DcaData<Parameters, DT>::writeDisAvgGreensFunction(Writer& writer) {
   if (parameters_.dump_cluster_Greens_functions()) {
     writer.execute(G_k_w);
   }
@@ -846,26 +875,18 @@ void DcaData<Parameters, DT>::makeDisorderedG0(const DisorderConfiguration& diso
                 G0_r_w_cluster_excluded(inu1, inu2, d, w);
       }
 
-  // Disorder Dyson in the full two space-index basis: invert the clean G0, add the disorder
-  // shift, then invert again. The shift is a DUMMY (nu*N_R) x (nu*N_R) array of zeros for now
-  // (=> clean round trip), sized to match the Green's-function matrix one-to-one so the real
-  // disorder may be fully general (off-diagonal in both R and nu).
-  //
-  // Note on the pointer idiom: &disordered_G0_r_r_w_cl_exl(0,0,0,0,w) is the base address of
-  // frequency w's contiguous (nu*N_R) x (nu*N_R) block (w is the slowest/outermost index). The
-  // copy*Array routines then walk the whole block by pointer arithmetic with leading dimension
-  // nu_r_matrix_dim, so all (nu1,R1,nu2,R2) entries round-trip to/from the dense matrix in their
-  // matching (row=nu1+nu_matrix_dim*R1, col=nu2+nu_matrix_dim*R2) slots.
+  // Disorder Dyson per frequency: invert clean G0, add the site-local potential V(R) onto the
+  // diagonal (entry nu+nu_matrix_dim*R holds disorder_configuration(nu,R)), then invert again.
   dca::linalg::Matrix<std::complex<Real>, dca::linalg::CPU> g0_dis_block(nu_r_matrix_dim);
-  dca::linalg::Matrix<std::complex<Real>, dca::linalg::CPU> disorder_array(nu_r_matrix_dim);
   for (int w = 0; w < WDmn::dmn_size(); ++w) {
     dca::linalg::matrixop::copyArrayToMatrix(nu_r_matrix_dim, nu_r_matrix_dim,
                                              &disordered_G0_r_r_w_cl_exl(0, 0, 0, 0, w),
                                              nu_r_matrix_dim, g0_dis_block);
     dca::linalg::matrixop::inverse(g0_dis_block);
-    for (int j = 0; j < nu_r_matrix_dim; ++j)
-      for (int i = 0; i < nu_r_matrix_dim; ++i)
-        g0_dis_block(i, j) += disorder_array(i, j);  // dummy stand-in for the disorder potential
+    for (int ir = 0; ir < r_matrix_dim; ++ir)
+      for (int imd = 0; imd < nu_matrix_dim; ++imd)
+        g0_dis_block(imd + nu_matrix_dim * ir, imd + nu_matrix_dim * ir) +=
+            disorder_configuration(imd, ir);
     dca::linalg::matrixop::inverse(g0_dis_block);
     dca::linalg::matrixop::copyMatrixToArray(g0_dis_block,
                                              &disordered_G0_r_r_w_cl_exl(0, 0, 0, 0, w),
