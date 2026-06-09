@@ -300,13 +300,13 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::execute() {
 
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClusters() {
-#ifdef TWO_R_DISORDER
-  // TODO(pin): handle the ordered (zero-config) case better in a TWO_R_DISORDER build. The
+#ifdef DISORDERED_G0
+  // TODO(pin): handle the ordered (zero-config) case better in a DISORDERED_G0 build. The
   // single-cluster path (collectSingle -> compute_G_k_w_from_M_r_w) is gated off here, so it
   // cannot produce G_k_w; for now we require at least one disorder configuration.
   if (parameters.get_disorder_num_configurations() == 0)
     throw std::logic_error(
-        "TWO_R_DISORDER build requires disorder-num-configurations >= 1 "
+        "DISORDERED_G0 build requires disorder-num-configurations >= 1 "
         "(the ordered single-cluster path is disabled in this build).");
 #endif
   if (parameters.get_disorder_num_configurations() > 0) {
@@ -326,7 +326,7 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
                   << " unique disorder configurations; generated only " << num_configurations
                   << ".\n";
     }
-#ifdef TWO_R_DISORDER
+#ifdef DISORDERED_G0
     MOMS.disorder_G_r_r_w = 0;
     MOMS.G_k_w = 0;
 #else
@@ -459,7 +459,7 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::averageGkw() 
   const double total_disorder_weight =
       std::accumulate(disorder_weights.begin(), disorder_weights.end(), 0.0);
 
-#ifdef TWO_R_DISORDER
+#ifdef DISORDERED_G0
   using RClusterDmn = typename DcaDataType::RClusterDmn;
   using KClusterDmn = typename DcaDataType::KClusterDmn;
   using NuDmn = typename DcaDataType::NuDmn;

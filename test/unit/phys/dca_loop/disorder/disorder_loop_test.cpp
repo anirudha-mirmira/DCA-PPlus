@@ -6,7 +6,7 @@
 //
 // Author: Anirudha Mirmira (anirudha.mirmira@gmail.com)
 //
-// Unit test for the TWO_R_DISORDER disorder-averaging pipeline as wired in DcaLoop::workTheClusters
+// Unit test for the DISORDERED_G0 disorder-averaging pipeline as wired in DcaLoop::workTheClusters
 // / averageGkw, exercised on the real DcaData (2x4 cluster, Nc=8) WITHOUT running the QMC.
 //
 // With U = 0 the interaction vertices vanish, so M = 0 and the per-configuration Dyson collapses to
@@ -92,7 +92,7 @@ void fillCleanG0(Data& data) {
 }
 
 // makeDisorderedG0's legacy time-domain loop inverts nu-blocks of G0_r_t_cluster_excluded; give it
-// invertible (identity) blocks. Its output is unused by the TWO_R_DISORDER path.
+// invertible (identity) blocks. Its output is unused by the DISORDERED_G0 path.
 void fillG0rtIdentity(Data& data) {
   auto& g = data.G0_r_t_cluster_excluded;
   g = Scalar(0);

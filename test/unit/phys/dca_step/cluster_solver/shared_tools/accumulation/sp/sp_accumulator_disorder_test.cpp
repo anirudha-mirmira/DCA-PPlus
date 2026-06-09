@@ -174,7 +174,9 @@ TEST_F(SpAccumulatorDisorderTest, ValuePlacementFullMatrix) {
 #else  // DISORDERED_G0
 
 TEST(SpAccumulatorDisorderTest, DisabledWithoutDisorderedG0) {
-  GTEST_SKIP() << "Built without DISORDERED_G0; two-site disorder accumulator path is inactive.";
+  // gtest 1.8.0 (bundled) has no GTEST_SKIP; SUCCEED() makes this a trivially-passing placeholder
+  // when built without DISORDERED_G0 (the two-site disorder accumulator path is inactive).
+  SUCCEED() << "Built without DISORDERED_G0; two-site disorder accumulator path is inactive.";
 }
 
 #endif  // DISORDERED_G0

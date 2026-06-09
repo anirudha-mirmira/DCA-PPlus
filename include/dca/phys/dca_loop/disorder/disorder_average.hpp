@@ -6,7 +6,7 @@
 //
 // Author: Anirudha Mirmira (anirudha.mirmira@gmail.com)
 //
-// Numeric kernels of the TWO_R_DISORDER disorder-averaging path, factored out of the cluster
+// Numeric kernels of the DISORDERED_G0 disorder-averaging path, factored out of the cluster
 // solver and the DCA loop so they can be unit tested in isolation:
 //
 //   accumulateDisorderDyson - per-frequency dense (nu*N_R) Dyson G = G0_dis - G0_dis*M*G0_dis/beta,

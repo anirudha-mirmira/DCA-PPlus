@@ -346,7 +346,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::integrate() {
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkw(double weight) {
   collect_measurements();
-#if defined(DISORDERED_G0) && defined(TWO_R_DISORDER)
+#ifdef DISORDERED_G0
   accumulateGrrwFromMrrw(data_.disorder_G_r_r_w, weight);
 #else
   accumulateGkwFromMrw(data_.accumulated_G_k_w, weight);
@@ -480,37 +480,33 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeErrorBars() {
   if (concurrency_.id() == concurrency_.first())
     std::cout << "\n\t\t compute-error-bars on Self-energy\t" << dca::util::print_time() << "\n\n";
 
-  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
-  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
-
   accumulator_.finalize();
 
 #ifdef DISORDERED_G0
-  func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_w_new("M_r_w_new");
-  M_r_w_new = accumulator_.get_sign_times_M_r_w();
-  M_r_w_new /= static_cast<typename decltype(M_r_w_new)::this_scalar_type>(
-      accumulator_.get_accumulated_phase());
-#ifdef TWO_R_DISORDER
-  // TODO: disorder-average M_r_w_new, compute G_r_w, Fourier transform
-  // M_r_w_new -> M_k_w_new and G_r_w -> G_k_w_new, then fall through to
-  // compute_G_k_w_new, compute_S_k_w_new, and stddev calls below.
+  // TODO(pin, IMPORTANT): error bars on G_k_w and Sigma are NOT computed in the disorder
+  // (DISORDERED_G0) build. Under DISORDERED_G0 the accumulator's get_sign_times_M_r_w()
+  // returns the two-site <nu,R,nu,R,w> M, which the single-R compute_G_k_w_new /
+  // compute_S_k_w_new / average_and_compute_stddev machinery below cannot consume directly.
+  // The old R1==R2 diagonal extraction was removed (wrong physics: it errored on the diagonal
+  // of M, not the disorder-averaged quantity). What is still owed here, in increasing difficulty:
+  //   1. num_configs == 0 (ordered / no-disorder case): reproduce the exact clean-path behavior
+  //      below -- get_sign_times_M_r_w (single config) -> M_k_w_new -> G_k_w_new -> Sigma_new_,
+  //      then average_and_compute_stddev on Sigma and G. Today get_sign_times_M_r_w has the
+  //      two-index domain even with no disorder, so this needs a single-R extraction/conversion.
+  //      (Also note dca_loop::workTheClusters currently throws for num_configs == 0 under
+  //      DISORDERED_G0 -- see that pinned TODO.)
+  //   2. num_configs > 0: after averageGkw() has built the disorder-averaged G_k_w (rr
+  //      accumulation -> translational average -> FT r->k), still produce error bars on that
+  //      G_k_w and Sigma. The accumulator only retains the LAST config, so the cheap version is
+  //      the within-config QMC error pushed through the same r-space Dyson + translational
+  //      average + FT r->k pipeline as averageGkw, then average_and_compute_stddev.
+  //   3. Error bars ACROSS disorder configurations (the spread of the per-config G/Sigma) is the
+  //      statistically correct disorder error but is a much more elaborate procedure (needs a
+  //      per-config accumulator of the translationally-averaged G_k_w/Sigma). Separate TODO.
 #else
-  // WIP: extract R1==R2 diagonal for single-R transform until TWO_R_DISORDER is implemented.
-  {
-    func::function<std::complex<Real>, NuNuRClusterWDmn> M_r_w_single("M_r_w_single");
-    for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
-      for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
-        for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
-          for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
-            M_r_w_single(nu1, nu2, R_ind, w_ind) = M_r_w_new(nu1, R_ind, nu2, R_ind, w_ind);
-    math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_single, M_k_w_new);
-    compute_G_k_w_new(M_k_w_new, G_k_w_new);
-    compute_S_k_w_new(G_k_w_new, Sigma_new_);
-    concurrency_.average_and_compute_stddev(Sigma_new_, data_.get_Sigma_stdv());
-    concurrency_.average_and_compute_stddev(G_k_w_new, data_.get_G_k_w_stdv());
-  }
-#endif  // TWO_R_DISORDER
-#else
+  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
+  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
+
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new("M_r_w_new");
   M_r_w_new = accumulator_.get_sign_times_M_r_w();
   M_r_w_new /= static_cast<typename decltype(M_r_w_new)::this_scalar_type>(
@@ -565,6 +561,8 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
     accumulated_sign_ = accumulator_.get_accumulated_phase();
     collect_delayed(accumulated_sign_);
 #ifdef DISORDERED_G0
+    // Under DISORDERED_G0 get_sign_times_M_r_w() returns the two-site M(R1,R2,w) (name is historical);
+    // the static_assert enforces it matches the two-site M_r_r_w_ domain.
     static_assert(
         std::is_same_v<decltype(M_r_r_w_), std::decay_t<decltype(accumulator_.get_sign_times_M_r_w())>>);
     M_r_r_w_ = accumulator_.get_sign_times_M_r_w();
@@ -628,16 +626,8 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::collect_measurements(
   M_r_r_w_ /= static_cast<typename decltype(M_r_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_r_w_squared_ /=
       static_cast<typename decltype(M_r_r_w_squared_)::this_scalar_type>(accumulated_sign_);
-#ifndef TWO_R_DISORDER
-  // WIP: copy R1==R2 diagonal of M_r_r_w_ into M_r_w_ so the single-R downstream path
-  // (compute_G_k_w_from_M_r_w, accumulateGkwFromMrw) has data. With TWO_R_DISORDER the
-  // r-space Dyson uses M_r_r_w_ directly, so M_r_w_ is unused and this copy is skipped.
-  for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
-    for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
-      for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
-        for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
-          M_r_w_(nu1, nu2, R_ind, w_ind) = M_r_r_w_(nu1, R_ind, nu2, R_ind, w_ind);
-#endif  // TWO_R_DISORDER
+  // The r-space disorder Dyson (accumulateGrrwFromMrrw) consumes the two-site M_r_r_w_ directly;
+  // the single-R M_r_w_ is unused in the disorder build.
 #else
   M_r_w_ /= static_cast<typename decltype(M_r_w_)::this_scalar_type>(accumulated_sign_);
   M_r_w_squared_ /=
@@ -731,7 +721,7 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeG_k_w(
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::compute_G_k_w_from_M_r_w() {
-#ifndef TWO_R_DISORDER
+#ifndef DISORDERED_G0
   func::function<std::complex<double>, NuNuKClusterWDmn> M_k_w;
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_, M_k_w);
 
@@ -763,14 +753,14 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::compute_G_k_w_from_M_
   }
 
   Symmetrize<Parameters>::execute(data_.G_k_w, data_.H_symmetry);
-#endif  // TWO_R_DISORDER
+#endif  // DISORDERED_G0
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
     func::function<std::complex<Real>, func::dmn_variadic<NuDmn, NuDmn, KDmn, WDmn>>& G_k_w,
     double weight) {
-#ifndef TWO_R_DISORDER
+#ifndef DISORDERED_G0
   func::function<std::complex<double>, NuNuKClusterWDmn> M_k_w;
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_, M_k_w);
 
@@ -811,19 +801,19 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkwFromMrw(
   // symmetry is only guaranteed if enough disorder configurations are
   // summed over.
   // Symmetrize<Parameters>::execute(data_.G_k_w, data_.H_symmetry);
-#endif  // TWO_R_DISORDER
+#endif  // DISORDERED_G0
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
 void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGrrwFromMrrw(
     func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
     double weight) {
-#if defined(DISORDERED_G0) && defined(TWO_R_DISORDER)
+#ifdef DISORDERED_G0
   // Per-frequency Dyson G = G0_dis - G0_dis*M*G0_dis/beta on the dense (nu*N_R) two-site basis,
   // accumulated with the config weight into G_r_r_w.
   disorder::accumulateDisorderDyson<nu, RDmn, w, Real>(
       data_.disordered_G0_r_r_w_cl_exl, M_r_r_w_, parameters_.get_beta(), weight, G_r_r_w);
-#endif  // DISORDERED_G0 && TWO_R_DISORDER
+#endif  // DISORDERED_G0
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
@@ -1089,32 +1079,40 @@ auto CtauxClusterSolver<device_t, Parameters, Data, DIST>::local_G_k_w() const {
     throw std::logic_error("The local data was already averaged.");
 
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
-  func::function<std::complex<double>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
 #ifdef DISORDERED_G0
-  func::function<std::complex<double>, NuRNuRClusterWDmn> M_r_w_new(
-      accumulator_.get_sign_times_M_r_w(), "M_r_w_new");
+  // Per-node local G in the disorder build: same r-space pipeline as the production path
+  // (accumulateGrrwFromMrrw + averageGkw), applied to THIS single config with NO cross-rank
+  // averaging. M_r_r_w_new, G_r_r_w_new, G_r_w_new are function-local scratch (destroyed at scope
+  // exit); only G_k_w_new is returned. The kernel reads disordered_G0_r_r_w_cl_exl / M through const
+  // MatrixViews (never mutates them) and accumulates into the LOCAL G_r_r_w_new, so zeroing it
+  // cannot affect any data_ member or downstream state.
+
+  // (1) Genuine two-site M(R1,R2,w), normalized by the LOCAL sign (get_accumulated_sign, matching
+  //     the clean branch -- the per-node sign, not collect_measurements' MPI-summed one).
+  func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_r_w_new(
+      accumulator_.get_sign_times_M_r_w(), "M_r_r_w_new");
+  M_r_r_w_new /= accumulator_.get_accumulated_sign();
+
+  // (2) r-space disorder Dyson, single config => weight 1. G_r_r_w_new is freshly default-
+  //     constructed (zero-initialized), which the accumulating kernel (acc += weight*G) requires.
+  func::function<std::complex<Real>, NuRNuRClusterWDmn> G_r_r_w_new("G_r_r_w_new");
+  disorder::accumulateDisorderDyson<nu, RDmn, w, Real>(
+      data_.disordered_G0_r_r_w_cl_exl, M_r_r_w_new, parameters_.get_beta(), 1.0, G_r_r_w_new);
+
+  // (3) translational average <nu,R,nu,R,w> -> <nu,nu,R,w>, then FT r->k into G_k_w_new.
+  func::function<std::complex<Real>, NuNuRClusterWDmn> G_r_w_new("G_r_w_new");
+  disorder::translationalAverage<nu, RDmn, w>(G_r_r_w_new, G_r_w_new);
+  math::transform::FunctionTransform<RDmn, KDmn>::execute(G_r_w_new, G_k_w_new);
 #else
+  func::function<std::complex<double>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new(
       accumulator_.get_sign_times_M_r_w(), "M_r_w_new");
-#endif
 
   M_r_w_new /= accumulator_.get_accumulated_sign();
 
-#ifndef TWO_R_DISORDER
-#ifdef DISORDERED_G0
-  // WIP: extract R1==R2 diagonal for single-R transform until TWO_R_DISORDER is implemented.
-  func::function<std::complex<double>, NuNuRClusterWDmn> M_r_w_single("M_r_w_single");
-  for (int w_ind = 0; w_ind < w::dmn_size(); ++w_ind)
-    for (int R_ind = 0; R_ind < RDmn::dmn_size(); ++R_ind)
-      for (int nu2 = 0; nu2 < nu::dmn_size(); ++nu2)
-        for (int nu1 = 0; nu1 < nu::dmn_size(); ++nu1)
-          M_r_w_single(nu1, nu2, R_ind, w_ind) = M_r_w_new(nu1, R_ind, nu2, R_ind, w_ind);
-  math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_single, M_k_w_new);
-#else
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_new, M_k_w_new);
-#endif  // DISORDERED_G0
   compute_G_k_w_new(M_k_w_new, G_k_w_new);
-#endif  // TWO_R_DISORDER
+#endif  // DISORDERED_G0
 
   return G_k_w_new;
 }

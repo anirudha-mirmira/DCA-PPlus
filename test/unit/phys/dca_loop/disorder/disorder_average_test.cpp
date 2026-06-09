@@ -6,7 +6,7 @@
 //
 // Author: Anirudha Mirmira (anirudha.mirmira@gmail.com)
 //
-// Unit tests for the TWO_R_DISORDER numeric kernels in
+// Unit tests for the DISORDERED_G0 numeric kernels in
 // include/dca/phys/dca_loop/disorder/disorder_average.hpp:
 //
 //   1. translationalAverage  - orientation / round-trip: unfolding a single-displacement g0 into

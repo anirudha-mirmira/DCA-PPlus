@@ -7,7 +7,7 @@
 // Author: Anirudha Mirmira (anirudha.mirmira@gmail.com)
 //
 // Unit tests for the real-space (R1,R2) disordered-G0 construction in DcaData::makeDisorderedG0
-// used by the TWO_R_DISORDER path:
+// used by the DISORDERED_G0 path:
 //   1. the single k->r FunctionTransform of the cluster-excluded clean G0,
 //   2. unfolding the translationally invariant clean G0 into the full two space-index quantity
 //      disordered_G0_r_r_w_cl_exl(nu1,R1,nu2,R2,w) = g(R1 - R2) via the cluster subtract table,
