@@ -75,7 +75,6 @@ public:
   using Accumulator = ctaux::CtauxAccumulator<device_t, Parameters, Data, DIST>;
   using SpGreensFunction = typename Data::SpGreensFunction;
   using SpDisorderedGreensFunction = typename Data::SpDisorderedGreensFunction;
-  using SpRDisorderedGreensFunction = typename Data::SpRDisorderedGreensFunction;
 
   static constexpr linalg::DeviceType device = device_t;
 
@@ -106,7 +105,6 @@ public:
   void write(Writer& writer);
 
   void initialize(int dca_iteration);
-  void initialize(int dca_iteration, SpRDisorderedGreensFunction& g0_disordered);
 
   void integrate();
 
@@ -243,6 +241,13 @@ CtauxClusterSolver<device_t, Parameters, Data, DIST>::CtauxClusterSolver(
 #endif
       averaged_(false),
       writer_(writer) {
+#ifdef DISORDERED_G0
+  // The two-particle (G4) accumulator measures against the clean G0_k_w_cluster_excluded, which is
+  // inconsistent with the disordered walker; fail fast rather than produce wrong G4 under disorder.
+  if (parameters_.isAccumulatingG4())
+    throw std::logic_error(
+        "Two-particle (G4) accumulation is not supported with DISORDERED_G0.");
+#endif
   if (concurrency_.id() == concurrency_.first())
     std::cout << "\n\n\t CT-AUX Integrator is born \n" << std::endl;
 }
@@ -258,27 +263,6 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::write(Writer& writer)
   accumulator_.write(writer);
 
   writer.close_group();
-}
-
-template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
-void CtauxClusterSolver<device_t, Parameters, Data, DIST>::initialize(
-    int dca_iteration, SpRDisorderedGreensFunction& g0_disordered) {
-  dca_iteration_ = dca_iteration;
-
-  g0_.initialize(g0_disordered);
-
-  Sigma_old_ = data_.Sigma;
-
-  accumulator_.initialize(dca_iteration_);
-
-  averaged_ = false;
-  compute_jack_knife_ =
-      (dca_iteration == parameters_.get_dca_iterations() - 1) &&
-      (parameters_.get_error_computation_type() == ErrorComputationType::JACK_KNIFE);
-
-  if (concurrency_.id() == concurrency_.first())
-    std::cout << "\n\n\t CT-AUX Integrator has initialized (DCA-iteration : " << dca_iteration
-              << ")\n\n";
 }
 
 template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>

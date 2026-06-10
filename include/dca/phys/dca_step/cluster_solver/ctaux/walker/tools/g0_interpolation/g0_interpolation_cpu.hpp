@@ -66,11 +66,15 @@ public:
   /// For testing
   auto& getAkimaCoefficients() { return Base::akima_coefficients; }
 private:
-  auto interpolate(int nu_0, int nu_1, int delta_r, Real delta_time) -> Scalar const;
+  // MAJOR CHANGE (DISORDERED_G0): these lookups take the two ABSOLUTE sites (r_0, r_1) instead of a
+  // single displacement, uniformly for both builds, so the build/update call sites stay #ifdef-free.
+  // Only each body's domain-index line is gated; the clean branch rebuilds delta_r = r1_minus_r0(r_1,
+  // r_0), preserving clean numerics exactly.
+  auto interpolate(int nu_0, int r_0, int nu_1, int r_1, Real delta_time) -> Scalar const;
 
-  auto interpolate_on_diagonal(int nu_i) -> Scalar const;
+  auto interpolate_on_diagonal(int nu_i, int r_i) -> Scalar const;
 
-  auto interpolate_akima(int nu_0, int nu_1, int delta_r, Real tau) -> Scalar const;
+  auto interpolate_akima(int nu_0, int r_0, int nu_1, int r_1, Real tau) -> Scalar const;
 
 private:
   using Base::parameters;
@@ -130,22 +134,22 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::build_G0_matrix(
       for (int i = 0; i < j; i++) {
         vertex_singleton_type& v_i = configuration_e_spin[i];
 
-        G0_e_spin(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                            r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+        G0_e_spin(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                            v_j.get_spin_orbital(), v_j.get_r_site(),
                                             (v_i.get_tau() - v_j.get_tau()));
       }
     }
 
     {  // i == j
-      G0_e_spin(j, j) = interpolate_on_diagonal(v_j.get_spin_orbital());
+      G0_e_spin(j, j) = interpolate_on_diagonal(v_j.get_spin_orbital(), v_j.get_r_site());
     }
 
     {  // j > i
       for (int i = j + 1; i < configuration_size; i++) {
         vertex_singleton_type& v_i = configuration_e_spin[i];
 
-        G0_e_spin(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                            r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+        G0_e_spin(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                            v_j.get_spin_orbital(), v_j.get_r_site(),
                                             (v_i.get_tau() - v_j.get_tau()));
       }
     }
@@ -175,22 +179,22 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::build_G0_matrix(
       for (int i = 0; i < j; i++) {
         vertex_singleton_type& v_i = configuration[i];
 
-        G0(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                     r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+        G0(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                     v_j.get_spin_orbital(), v_j.get_r_site(),
                                      (v_i.get_tau() - v_j.get_tau()));
       }
     }
 
     {  // i == j
-      G0(j, j) = interpolate_on_diagonal(v_j.get_spin_orbital());
+      G0(j, j) = interpolate_on_diagonal(v_j.get_spin_orbital(), v_j.get_r_site());
     }
 
     {  // j > i
       for (int i = j + 1; i < configuration_size; i++) {
         vertex_singleton_type& v_i = configuration[i];
 
-        G0(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                     r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+        G0(i, j) = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                     v_j.get_spin_orbital(), v_j.get_r_site(),
                                      (v_i.get_tau() - v_j.get_tau()));
       }
     }
@@ -227,8 +231,8 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::update_G0_matrix(
 
       vertex_singleton_type& v_i = configuration_e_spin[i];
 
-      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                    r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                    v_j.get_spin_orbital(), v_j.get_r_site(),
                                     (v_i.get_tau() - v_j.get_tau()));
     }
   }
@@ -244,13 +248,13 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::update_G0_matrix(
 
       vertex_singleton_type& v_i = configuration_e_spin[i];
 
-      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                    r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                    v_j.get_spin_orbital(), v_j.get_r_site(),
                                     (v_i.get_tau() - v_j.get_tau()));
     }
 
     {  // i == j
-      G0_ptr[j] = interpolate_on_diagonal(v_j.get_spin_orbital());
+      G0_ptr[j] = interpolate_on_diagonal(v_j.get_spin_orbital(), v_j.get_r_site());
     }
 
     // i>j
@@ -259,8 +263,8 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::update_G0_matrix(
 
       vertex_singleton_type& v_i = configuration_e_spin[i];
 
-      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_j.get_spin_orbital(),
-                                    r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+      G0_ptr[i] = interpolate_akima(v_i.get_spin_orbital(), v_i.get_r_site(),
+                                    v_j.get_spin_orbital(), v_j.get_r_site(),
                                     (v_i.get_tau() - v_j.get_tau()));
     }
   }
@@ -277,8 +281,8 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::update_G0_matrix(
 
     vertex_singleton_type& v_i = configuration_e_spin[i];
 
-    G0_ptr[i] = interpolate(v_i.get_spin_orbital(),v_j.get_spin_orbital(),
-    r1_minus_r0(v_j.get_r_site(), v_i.get_r_site()),
+    G0_ptr[i] = interpolate(v_i.get_spin_orbital(), v_i.get_r_site(),
+    v_j.get_spin_orbital(), v_j.get_r_site(),
     (v_i.get_tau()-v_j.get_tau()));
     }
     }
@@ -286,7 +290,8 @@ void G0Interpolation<dca::linalg::CPU, Parameters>::update_G0_matrix(
 }
 
 template <typename Parameters>
-auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate(int nu_0, int nu_1, int delta_r,
+// MAJOR CHANGE (DISORDERED_G0): absolute sites (r_0,r_1); uniform signature, only the index is gated.
+auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate(int nu_0, int r_0, int nu_1, int r_1,
                                                                 Real tau) -> Scalar const {
   // make sure that new_tau is positive !!
   new_tau = tau + beta;
@@ -300,7 +305,11 @@ auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate(int nu_0, int nu
   delta_tau = scaled_tau - t_ind;
   assert(delta_tau > -1.e-16 && delta_tau <= 1 + 1.e-16);
 
-  linind = nu_nu_r_dmn_t_t_shifted_dmn(nu_0, nu_1, delta_r, t_ind);
+#ifdef DISORDERED_G0
+  linind = nu_nu_r_dmn_t_t_shifted_dmn(nu_0, r_0, nu_1, r_1, t_ind);
+#else
+  linind = nu_nu_r_dmn_t_t_shifted_dmn(nu_0, nu_1, r1_minus_r0(r_1, r_0), t_ind);
+#endif
 
   f_0 = G0_r_t_shifted(linind);
   grad = grad_G0_r_t_shifted(linind);
@@ -309,17 +318,25 @@ auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate(int nu_0, int nu
 }
 
 template <typename Parameters>
-auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate_on_diagonal(int nu_i)
+// MAJOR CHANGE (DISORDERED_G0): absolute site r_i; uniform signature, only the lookup is gated.
+auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate_on_diagonal(int nu_i,
+                                                                            [[maybe_unused]] int r_i)
     -> Scalar const {
   const static int t_0_index = shifted_t::dmn_size() / 2;
+#ifdef DISORDERED_G0
+  // On-site G0_dis(R,R) varies site to site under disorder, so read the vertex's own site r_i
+  // (still the R-diagonal) rather than the clean origin.
+  return -G0_r_t_shifted(nu_i, r_i, nu_i, r_i, t_0_index);
+#else
   const static int r_0_index = r_cluster_type::origin_index();
-
   return -G0_r_t_shifted(nu_i, nu_i, r_0_index, t_0_index);
+#endif
 }
 
 template <typename Parameters>
-auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate_akima(int nu_0, int nu_1,
-                                                                      int delta_r, Real tau)
+// MAJOR CHANGE (DISORDERED_G0): absolute sites (r_0,r_1); uniform signature, only the index is gated.
+auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate_akima(int nu_0, int r_0, int nu_1,
+                                                                      int r_1, Real tau)
     -> Scalar const {
   // make sure that new_tau is positive !!
   new_tau = tau + beta;
@@ -333,7 +350,11 @@ auto G0Interpolation<dca::linalg::CPU, Parameters>::interpolate_akima(int nu_0, 
   delta_tau = scaled_tau - t_ind;
   assert(delta_tau > -1.e-16 && delta_tau <= 1 + 1.e-16);
 
-  linind = 4 * nu_nu_r_dmn_t_t_shifted_dmn(nu_0, nu_1, delta_r, t_ind);
+#ifdef DISORDERED_G0
+  linind = 4 * nu_nu_r_dmn_t_t_shifted_dmn(nu_0, r_0, nu_1, r_1, t_ind);
+#else
+  linind = 4 * nu_nu_r_dmn_t_t_shifted_dmn(nu_0, nu_1, r1_minus_r0(r_1, r_0), t_ind);
+#endif
 
   auto* a_ptr = &akima_coefficients(linind);
 

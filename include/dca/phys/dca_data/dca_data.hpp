@@ -786,88 +786,15 @@ void DcaData<Parameters, DT>::readSigmaFile(io::Reader<Concurrency>& reader) {
 template <class Parameters, DistType DT>
 void DcaData<Parameters, DT>::makeDisorderedG0(const DisorderConfiguration& disorder_configuration,
                                                const Type_G0_r_t& g0_r_t_cl_exl) {
-  int nu_matrix_dim = NuDmn::dmn_size();
-  int r_matrix_dim = RClusterDmn::dmn_size();
-  dca::linalg::Matrix<Scalar, dca::linalg::CPU,
-                      dca::linalg::util::DefaultAllocator<Scalar, dca::linalg::CPU>>
-      g0_rtcex_inverse(nu_matrix_dim);
+  const int nu_matrix_dim = NuDmn::dmn_size();
+  const int r_matrix_dim = RClusterDmn::dmn_size();
+  const int nu_r_matrix_dim = nu_matrix_dim * r_matrix_dim;
 
-  int nu_r_matrix_dim = NuDmn::dmn_size() * RClusterDmn::dmn_size();
-  dca::linalg::Matrix<Scalar, dca::linalg::CPU,
-                      dca::linalg::util::DefaultAllocator<Scalar, dca::linalg::CPU>>
-      g0_dis_tcex_inverse(nu_matrix_dim);
-  // dca::linalg::Vector<int, dca::linalg::CPU,
-  //                     dca::linalg::util::DefaultAllocator<std::complex<double>, dca::linalg::CPU>>
-  //     ipiv;
-  // dca::linalg::Vector<std::complex<double>, dca::linalg::CPU,
-  //                     dca::linalg::util::DefaultAllocator<std::complex<double>, dca::linalg::CPU>>
-  //     work;
-
-  dca::linalg::Vector<Scalar, dca::linalg::CPU,
-                      dca::linalg::util::DefaultAllocator<Scalar, dca::linalg::CPU>>
-  rt_block(std::size_t(NuDmn::dmn_size() * NuDmn::dmn_size()));
-
-  for (int it = 0; it < TDmn::dmn_size(); ++it) {
-    for (int ir = 0; ir < RClusterDmn::dmn_size(); ++ir) {
-      g0_r_t_cl_exl.slice(0, 1, {0, 0, ir, it}, rt_block.data());
-      dca::linalg::matrixop::copyArrayToMatrix(nu_matrix_dim, nu_matrix_dim, rt_block.data(),
-                                               nu_matrix_dim, g0_rtcex_inverse);
-      dca::linalg::matrixop::inverse(g0_rtcex_inverse);  //, ipiv, work);
-
-      // Then apply disorder potential to diagonal according to the
-      // configuration
-      for (int imd = 0; imd < nu_matrix_dim; ++imd) {
-        g0_rtcex_inverse(imd, imd) += disorder_configuration(imd, ir);
-      }
-      dca::linalg::matrixop::inverse(g0_rtcex_inverse);
-      for (int imd = 0; imd < nu_matrix_dim; ++imd) {
-        disordered_G0_r_r_t_cl_exl(imd, ir, imd, ir, it) = g0_rtcex_inverse(imd, imd);
-      }
-    }
-  }
-
-  // Superseded by the r1,r2 unfolding below; disabled (not deleted) because it references the
-  // removed two-k Disordered_G0_k_k_t/w quantities and would no longer compile.
-#if 0
-  math::transform::FunctionTransform<RClusterDmn, KClusterDmn>::execute(disordered_G0_r_r_t_cl_exl,
-                                                                        disordered_G0_k_k_t_cl_exl);
-  // At this point I beleive the matrix is nondiagonal in k
-
-  // disordered_G0_k_k_t_cl_exl.print_elements(std::cout);
-
-  // I can't figure out how to get this to work with the
-  // math::transform::FunctionTransform framwork so do this by hand
-  // here.
-  using Complex = std::complex<util::RealAlias<Scalar>>;
-  for (int k1 = 0; k1 < KClusterDmn::dmn_size(); ++k1) {
-    const auto& k1_val = KClusterDmn::get_elements()[k1];
-    for (int k2 = 0; k2 < KClusterDmn::dmn_size(); ++k2) {
-      const auto& k2_val = KClusterDmn::get_elements()[k2];
-      for (int inu1 = 0; inu1 < NuDmn::dmn_size(); ++inu1)
-        for (int inu2 = 0; inu2 < NuDmn::dmn_size(); ++inu2) {
-          for (int w = 0; w < WDmn::dmn_size(); ++w) {
-            const auto& w_val = WDmn::get_elements()[w];
-            Complex G_k_omega(0);
-            for (int t = 0; t < TDmn::dmn_size(); ++t) {
-              const auto& t_val = TDmn::get_elements()[t];
-              G_k_omega += disordered_G0_k_k_t_cl_exl(inu1, k1, inu2, k2, t) *
-                           std::exp(Complex(0, w_val * t_val));
-            }
-            disordered_G0_k_k_w_cl_exl(inu1, k1, inu2, k2, w) = G_k_omega;
-          }
-        }
-    }
-  }
-#endif
-
-  // Clean cluster-excluded G0 in (r,w): the frequency clean G0 is maintained in k-space, so
-  // transform it to real space (this member is not otherwise refreshed by cluster exclusion).
+  // The frequency clean G0 is kept in k-space; bring it to (r,w).
   math::transform::FunctionTransform<KClusterDmn, RClusterDmn>::execute(G0_k_w_cluster_excluded,
                                                                         G0_r_w_cluster_excluded);
 
-  // Unfold the translationally invariant clean G0 (single displacement) into the full two
-  // space-index quantity: clean G0(R1,R2) = g(R1 - R2) = G0_r_w(., subtract(R2,R1), .). This
-  // populates the clean values for now; the disorder Dyson (inversion + V + inversion) is next.
+  // Unfold the single-displacement clean G0 to two indices: G0(R1,R2) = g(subtract(R2,R1)).
   for (int w = 0; w < WDmn::dmn_size(); ++w)
     for (int R1 = 0; R1 < r_matrix_dim; ++R1)
       for (int R2 = 0; R2 < r_matrix_dim; ++R2) {
@@ -878,8 +805,10 @@ void DcaData<Parameters, DT>::makeDisorderedG0(const DisorderConfiguration& diso
                 G0_r_w_cluster_excluded(inu1, inu2, d, w);
       }
 
-  // Disorder Dyson per frequency: invert clean G0, add the site-local potential V(R) onto the
-  // diagonal (entry nu+nu_matrix_dim*R holds disorder_configuration(nu,R)), then invert again.
+  // Snapshot the clean unfold as the w->t tail-subtraction reference (shares G0_dis's 1/(iw) moment).
+  Disordered_G0_r_r_w clean_G0_r_r_w(disordered_G0_r_r_w_cl_exl);
+
+  // Per-frequency disorder Dyson: invert, add static V(R) on the diagonal, invert back.
   dca::linalg::Matrix<std::complex<Real>, dca::linalg::CPU> g0_dis_block(nu_r_matrix_dim);
   for (int w = 0; w < WDmn::dmn_size(); ++w) {
     dca::linalg::matrixop::copyArrayToMatrix(nu_r_matrix_dim, nu_r_matrix_dim,
@@ -895,6 +824,27 @@ void DcaData<Parameters, DT>::makeDisorderedG0(const DisorderConfiguration& diso
                                              &disordered_G0_r_r_w_cl_exl(0, 0, 0, 0, w),
                                              nu_r_matrix_dim);
   }
+
+  // Disordered G0 in imaginary time: the Dyson is a convolution in tau, so transform w->t with the
+  // tail trick instead of inverting per slice. Subtract the clean reference (O(1/w^2) remainder).
+  Disordered_G0_r_r_w delta_G0_r_r_w("delta_disordered_G0_r_r_w");
+  for (int i = 0; i < delta_G0_r_r_w.size(); ++i)
+    delta_G0_r_r_w(i) = disordered_G0_r_r_w_cl_exl(i) - clean_G0_r_r_w(i);
+
+  // FT the smooth remainder w->t (narrows complex->Scalar; t is trailing, (nu,R,nu,R) spectate).
+  Disordered_G0_r_r_t delta_G0_r_r_t("delta_disordered_G0_r_r_t");
+  math::transform::FunctionTransform<WDmn, TDmn>::execute(delta_G0_r_r_w, delta_G0_r_r_t);
+
+  // Add back the exact clean tau reference (V=0 => remainder is zero => clean tau G0 exactly).
+  for (int it = 0; it < TDmn::dmn_size(); ++it)
+    for (int R1 = 0; R1 < r_matrix_dim; ++R1)
+      for (int R2 = 0; R2 < r_matrix_dim; ++R2) {
+        const int d = RClusterDmn::parameter_type::subtract(R2, R1);
+        for (int inu1 = 0; inu1 < nu_matrix_dim; ++inu1)
+          for (int inu2 = 0; inu2 < nu_matrix_dim; ++inu2)
+            disordered_G0_r_r_t_cl_exl(inu1, R1, inu2, R2, it) =
+                delta_G0_r_r_t(inu1, R1, inu2, R2, it) + g0_r_t_cl_exl(inu1, inu2, d, it);
+      }
 }
 
 template <class Parameters, DistType DT>
