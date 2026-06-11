@@ -301,13 +301,19 @@ void DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::execute() {
 template <typename ParametersType, typename DcaDataType, typename MCIntegratorType, DistType DIST>
 double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClusters() {
 #ifdef DISORDERED_G0
-  // TODO(pin): handle the ordered (zero-config) case better in a DISORDERED_G0 build. The
-  // single-cluster path (collectSingle -> compute_G_k_w_from_M_r_w) is gated off here, so it
-  // cannot produce G_k_w; for now we require at least one disorder configuration.
-  if (parameters.get_disorder_num_configurations() == 0)
-    throw std::logic_error(
-        "DISORDERED_G0 build requires disorder-num-configurations >= 1 "
-        "(the ordered single-cluster path is disabled in this build).");
+  // In a DISORDERED_G0 build the ordered single-cluster path (collectSingle ->
+  // compute_G_k_w_from_M_r_w) is disabled, so it cannot produce G_k_w with zero configurations.
+  // Fall back to a single configuration with no disorder (V(R) = 0), which drives the disorder
+  // pipeline through its clean limit. A missing disorder section is a deliberate clean run, so it
+  // does this silently; a section that is present but requests zero configurations is a
+  // misconfiguration, so we warn.
+  if (parameters.get_disorder_num_configurations() == 0) {
+    if (parameters.get_disorder_present() && concurrency.id() == concurrency.first())
+      std::cerr << "Warning: a disorder section was provided but disorder-num-configurations is 0; "
+                   "running a single configuration with no disorder.\n";
+    parameters.set_disorder_potential(0.0);
+    parameters.set_disorder_num_configurations(1);
+  }
 #endif
   if (parameters.get_disorder_num_configurations() > 0) {
     // additional things for summation and getting the post solve G

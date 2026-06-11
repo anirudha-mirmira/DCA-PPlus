@@ -22,6 +22,7 @@ TEST(DisorderParametersTest, DefaultValues) {
   EXPECT_EQ(0, pars.get_disorder_num_configurations());
   // EXPECT_EQ(1, pars.get_disorder_max_sites());
   EXPECT_FALSE(pars.get_disorder_unique_configs());
+  EXPECT_FALSE(pars.get_disorder_present());
 }
 
 TEST(DomainsParametersTest, ReadAll) {
@@ -39,4 +40,22 @@ TEST(DomainsParametersTest, ReadAll) {
   EXPECT_EQ(10, pars.get_disorder_num_configurations());
   // EXPECT_EQ(1, pars.get_disorder_max_sites());
   EXPECT_TRUE(pars.get_disorder_unique_configs());
+  // A "disorder" section was present in the input.
+  EXPECT_TRUE(pars.get_disorder_present());
+}
+
+// A real input that has no "disorder" section: the parameters keep their (clean) defaults and
+// get_disorder_present() stays false, which is how the disorder flow tells a deliberate clean run
+// apart from a section that is present but misconfigured.
+TEST(DisorderParametersTest, ReadNoDisorderSection) {
+  dca::io::JSONReader reader;
+  dca::phys::params::DisorderParameters pars;
+
+  reader.open_file(DCA_SOURCE_DIR
+                   "/test/unit/phys/parameters/disorder_parameters/input_no_disorder.json");
+  pars.readWrite(reader);
+  reader.close_file();
+
+  EXPECT_FALSE(pars.get_disorder_present());
+  EXPECT_EQ(0, pars.get_disorder_num_configurations());
 }

@@ -34,7 +34,8 @@ public:
         disorder_density_(0.0),
         disorder_num_configurations_(0),
         // disorder_max_sites_(1),
-        disorder_unique_configs_(false) {}
+        disorder_unique_configs_(false),
+        disorder_present_(false) {}
 
   template <typename Concurrency>
   int getBufferSize(const Concurrency& concurrency) const;
@@ -52,17 +53,28 @@ public:
   double get_disorder_potential() const {
     return disorder_potential_;
   }
+  void set_disorder_potential(double potential) {
+    disorder_potential_ = potential;
+  }
   double get_disorder_density() const {
     return disorder_density_;
   }
   int get_disorder_num_configurations() const {
     return disorder_num_configurations_;
   }
+  void set_disorder_num_configurations(int num_configurations) {
+    disorder_num_configurations_ = num_configurations;
+  }
   // int get_disorder_max_sites() const {
   //   return disorder_max_sites_;
   // }
   bool get_disorder_unique_configs() const {
     return disorder_unique_configs_;
+  }
+  // Whether a "disorder" section was present in the input. Lets the disorder flow distinguish a
+  // deliberate clean run (no section) from a misconfigured one (section present, zero configs).
+  bool get_disorder_present() const {
+    return disorder_present_;
   }
 
 private:
@@ -72,6 +84,7 @@ private:
   int disorder_num_configurations_;
   // int disorder_max_sites_;
   bool disorder_unique_configs_;
+  bool disorder_present_;
 };
 
 template <typename Concurrency>
@@ -84,6 +97,7 @@ int DisorderParameters::getBufferSize(const Concurrency& concurrency) const {
   buffer_size += concurrency.get_buffer_size(disorder_num_configurations_);
   // buffer_size += concurrency.get_buffer_size(disorder_max_sites_);
   buffer_size += concurrency.get_buffer_size(disorder_unique_configs_);
+  buffer_size += concurrency.get_buffer_size(disorder_present_);
 
   return buffer_size;
 }
@@ -97,6 +111,7 @@ void DisorderParameters::pack(const Concurrency& concurrency, char* buffer, int 
   concurrency.pack(buffer, buffer_size, position, disorder_num_configurations_);
   // concurrency.pack(buffer, buffer_size, position, disorder_max_sites_);
   concurrency.pack(buffer, buffer_size, position, disorder_unique_configs_);
+  concurrency.pack(buffer, buffer_size, position, disorder_present_);
 }
 
 template <typename Concurrency>
@@ -108,12 +123,13 @@ void DisorderParameters::unpack(const Concurrency& concurrency, char* buffer, in
   concurrency.unpack(buffer, buffer_size, position, disorder_num_configurations_);
   // concurrency.unpack(buffer, buffer_size, position, disorder_max_sites_);
   concurrency.unpack(buffer, buffer_size, position, disorder_unique_configs_);
+  concurrency.unpack(buffer, buffer_size, position, disorder_present_);
 }
 
 template <typename ReaderOrWriter>
 void DisorderParameters::readWrite(ReaderOrWriter& reader_or_writer) {
   try {
-    reader_or_writer.open_group("disorder");
+    disorder_present_ = reader_or_writer.open_group("disorder");
 
     try {
       reader_or_writer.execute("distribution", disorder_distribution_);
