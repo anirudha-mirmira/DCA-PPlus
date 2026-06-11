@@ -450,6 +450,11 @@ if(DCA_WITH_CTAUX_TRACING)
   add_compile_definitions(CTAUX_DEBUG_TRACING)
 endif()
 
+option(DCA_WITH_DISORDER "Enable the site-local disorder potential in the CT-AUX cluster solver." OFF)
+if(DCA_WITH_DISORDER)
+  add_compile_definitions(DISORDERED_G0)
+endif()
+
 configure_file("${PROJECT_SOURCE_DIR}/include/dca/config/mc_options.hpp.in"
         "${CMAKE_BINARY_DIR}/include/dca/config/mc_options.hpp" @ONLY)
 
