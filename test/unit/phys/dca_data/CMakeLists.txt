@@ -20,3 +20,11 @@ dca_add_gtest(disordered_walker_g0_test
   GTEST_MAIN
   INCLUDE_DIRS ${DCA_INCLUDE_DIRS};${PROJECT_SOURCE_DIR};${FFTW_INCLUDE_DIR}
   LIBS function FFTW::Double ${DCA_LIBS} parallel_no_concurrency)
+
+# Step F (the U != 0 teeth): drives the real CT-AUX walker at U != 0 and checks that the accumulated
+# two-site M responds to the disorder potential, i.e. the walker samples the disordered G0.
+dca_add_gtest(disordered_walker_u_test
+  FAST
+  GTEST_MAIN
+  INCLUDE_DIRS ${DCA_INCLUDE_DIRS};${PROJECT_SOURCE_DIR};${FFTW_INCLUDE_DIR}
+  LIBS function FFTW::Double ${DCA_LIBS} ${DCA_KERNEL_LIBS} parallel_no_concurrency)
