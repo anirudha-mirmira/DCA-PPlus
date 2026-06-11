@@ -156,6 +156,11 @@ private:
   void accumulateGrrwFromMrrw(
       func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
       double weight);
+  // Rank-local (un-collected) analog of accumulateGrrwFromMrrw for QMC error bars: Dysons this
+  // rank's own per-config M (normalized by the per-rank phase) into G_r_r_w.
+  void accumulateLocalGrrwFromMrrw(
+      func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
+      double weight);
 
   double compute_S_k_w_from_G_k_w();
 
@@ -332,6 +337,9 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGkw(double 
   collect_measurements();
 #ifdef DISORDERED_G0
   accumulateGrrwFromMrrw(data_.disorder_G_r_r_w, weight);
+  // Per-rank (un-collected) accumulation for the cross-rank QMC error bar (only when requested).
+  if (accumulator_.compute_std_deviation())
+    accumulateLocalGrrwFromMrrw(data_.disorder_G_r_r_w_local, weight);
 #else
   accumulateGkwFromMrw(data_.accumulated_G_k_w, weight);
 #endif
@@ -467,26 +475,26 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::computeErrorBars() {
   accumulator_.finalize();
 
 #ifdef DISORDERED_G0
-  // TODO(pin, IMPORTANT): error bars on G_k_w and Sigma are NOT computed in the disorder
-  // (DISORDERED_G0) build. Under DISORDERED_G0 the accumulator's get_sign_times_M_r_w()
-  // returns the two-site <nu,R,nu,R,w> M, which the single-R compute_G_k_w_new /
-  // compute_S_k_w_new / average_and_compute_stddev machinery below cannot consume directly.
-  // The old R1==R2 diagonal extraction was removed (wrong physics: it errored on the diagonal
-  // of M, not the disorder-averaged quantity). What is still owed here, in increasing difficulty:
-  //   1. num_configs == 0 (ordered / no-disorder case): reproduce the exact clean-path behavior
-  //      below -- get_sign_times_M_r_w (single config) -> M_k_w_new -> G_k_w_new -> Sigma_new_,
-  //      then average_and_compute_stddev on Sigma and G. Today get_sign_times_M_r_w has the
-  //      two-index domain even with no disorder, so this needs a single-R extraction/conversion.
-  //      (Also note dca_loop::workTheClusters currently throws for num_configs == 0 under
-  //      DISORDERED_G0 -- see that pinned TODO.)
-  //   2. num_configs > 0: after averageGkw() has built the disorder-averaged G_k_w (rr
-  //      accumulation -> translational average -> FT r->k), still produce error bars on that
-  //      G_k_w and Sigma. The accumulator only retains the LAST config, so the cheap version is
-  //      the within-config QMC error pushed through the same r-space Dyson + translational
-  //      average + FT r->k pipeline as averageGkw, then average_and_compute_stddev.
-  //   3. Error bars ACROSS disorder configurations (the spread of the per-config G/Sigma) is the
-  //      statistically correct disorder error but is a much more elaborate procedure (needs a
-  //      per-config accumulator of the translationally-averaged G_k_w/Sigma). Separate TODO.
+  // QMC error bars on the disorder-averaged G_k_w and Sigma. accumulateGkw summed each rank's OWN
+  // (un-collected) per-config Dyson, over the whole disorder ensemble, into
+  // data_.disorder_G_r_r_w_local -- so it is a fully disorder-averaged, translationally-restored
+  // two-site G that carries only this rank's QMC noise. Here we finish the same pipeline as
+  // averageGkw (normalize -> translational average -> FT r->k) per rank, then
+  // average_and_compute_stddev takes the cross-rank mean and stddev. V=0 reduces to the clean bars.
+  const double total_disorder_weight =
+      std::accumulate(data_.disorder_weights.begin(), data_.disorder_weights.end(), 0.0);
+  data_.disorder_G_r_r_w_local /= total_disorder_weight;
+
+  func::function<std::complex<Real>, NuNuRClusterWDmn> G_r_w_new("G_r_w_new");
+  disorder::translationalAverage<nu, RDmn, w>(data_.disorder_G_r_r_w_local, G_r_w_new);
+
+  func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
+  math::transform::FunctionTransform<RDmn, KDmn>::execute(G_r_w_new, G_k_w_new);
+
+  compute_S_k_w_new(G_k_w_new, Sigma_new_);
+
+  concurrency_.average_and_compute_stddev(Sigma_new_, data_.get_Sigma_stdv());
+  concurrency_.average_and_compute_stddev(G_k_w_new, data_.get_G_k_w_stdv());
 #else
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> G_k_w_new("G_k_w_new");
   func::function<std::complex<Real>, func::dmn_variadic<nu, nu, KDmn, w>> M_k_w_new("M_k_w_new");
@@ -797,6 +805,23 @@ void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateGrrwFromMrr
   // accumulated with the config weight into G_r_r_w.
   disorder::accumulateDisorderDyson<nu, RDmn, w, Real>(
       data_.disordered_G0_r_r_w_cl_exl, M_r_r_w_, parameters_.get_beta(), weight, G_r_r_w);
+#endif  // DISORDERED_G0
+}
+
+template <dca::linalg::DeviceType device_t, class Parameters, class Data, DistType DIST>
+void CtauxClusterSolver<device_t, Parameters, Data, DIST>::accumulateLocalGrrwFromMrrw(
+    func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>>& G_r_r_w,
+    double weight) {
+#ifdef DISORDERED_G0
+  // Same Dyson as accumulateGrrwFromMrrw, but on THIS rank's own (un-collected) M instead of the
+  // MPI-combined M_r_r_w_. Each rank keeps its own per-config sum so computeErrorBars can take the
+  // cross-rank stddev. Normalized by the per-rank phase, matching the clean error-bar branch.
+  func::function<std::complex<Real>, func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>> M_r_r_w_local(
+      accumulator_.get_sign_times_M_r_w(), "M_r_r_w_local");
+  M_r_r_w_local /= static_cast<typename decltype(M_r_r_w_local)::this_scalar_type>(
+      accumulator_.get_accumulated_phase());
+  disorder::accumulateDisorderDyson<nu, RDmn, w, Real>(
+      data_.disordered_G0_r_r_w_cl_exl, M_r_r_w_local, parameters_.get_beta(), weight, G_r_r_w);
 #endif  // DISORDERED_G0
 }
 

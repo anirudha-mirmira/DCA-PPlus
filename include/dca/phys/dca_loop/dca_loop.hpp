@@ -334,6 +334,7 @@ double DcaLoop<ParametersType, DcaDataType, MCIntegratorType, DIST>::workTheClus
     }
 #ifdef DISORDERED_G0
     MOMS.disorder_G_r_r_w = 0;
+    MOMS.disorder_G_r_r_w_local = 0;
     MOMS.G_k_w = 0;
 #else
     MOMS.accumulated_G_k_w = 0;

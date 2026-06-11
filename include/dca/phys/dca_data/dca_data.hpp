@@ -241,6 +241,10 @@ public:
   /// Disorder-averaged interacting Green's function, accumulated over configs in
   /// accumulateGrrwFromMrrw.
   Disordered_G0_r_r_w disorder_G_r_r_w;
+  /// Rank-local (not MPI-collected) analog of disorder_G_r_r_w: each rank sums its own per-config
+  /// Dyson here so computeErrorBars can take the cross-rank stddev (QMC error of the disorder
+  /// average). Only populated when error bars are requested.
+  Disordered_G0_r_r_w disorder_G_r_r_w_local;
 
   /// Disorder realizations of the current DCA step: each configuration is the per-site random
   /// potential (box in [-W/2,W/2], binary +/-V/2), with uniform averaging weights. Generated in
