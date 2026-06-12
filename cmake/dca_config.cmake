@@ -452,6 +452,12 @@ endif()
 
 option(DCA_WITH_DISORDER "Enable the site-local disorder potential in the CT-AUX cluster solver." OFF)
 if(DCA_WITH_DISORDER)
+  # GPU disorder path is not implemented yet (Step G); the two-site walker G0 breaks the GPU build.
+  if(DCA_WITH_CUDA OR DCA_WITH_HIP)
+    message(FATAL_ERROR
+      "DCA_WITH_DISORDER is not supported together with a GPU build (DCA_WITH_CUDA / "
+      "DCA_WITH_HIP) yet. Reconfigure with the GPU backend disabled.")
+  endif()
   add_compile_definitions(DISORDERED_G0)
 endif()
 

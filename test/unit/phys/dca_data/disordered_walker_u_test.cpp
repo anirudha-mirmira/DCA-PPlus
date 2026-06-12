@@ -73,7 +73,6 @@ using WDmn = Data::WDmn;
 
 constexpr char input_file[] = DCA_SOURCE_DIR "/test/unit/phys/dca_data/input_disorder_walker_u.json";
 
-#ifdef DISORDERED_G0
 // Domain of the accumulated two-site M(nu0,R0,nu1,R1,w) (mirrors the solver's NuRNuRClusterWDmn).
 using MDmn = dca::func::dmn_variadic<NuDmn, RDmn, NuDmn, RDmn, WDmn>;
 using MFunction = dca::func::function<std::complex<double>, MDmn>;
@@ -91,14 +90,10 @@ double maxAbsDiff(const MFunction& a, const MFunction& b) {
     m = std::max(m, std::abs(a(i) - b(i)));
   return m;
 }
-#endif  // DISORDERED_G0
 
 }  // namespace
 
 TEST(DisorderedWalkerUTest, WalkerMSamplesDisorderedMedium) {
-#ifndef DISORDERED_G0
-  SUCCEED() << "walker-vs-disorder M teeth requires -DDISORDERED_G0";
-#else
   Concurrency concurrency(0, nullptr);
   Parameters parameters("", concurrency);
   parameters.read_input_and_broadcast<dca::io::JSONReader>(input_file);
@@ -163,5 +158,4 @@ TEST(DisorderedWalkerUTest, WalkerMSamplesDisorderedMedium) {
   // propagates in the disordered G0. Under the old bug (walker in the clean G0) this difference is 0.
   EXPECT_GT(maxAbsDiff(M_zero_a, M_nonzero), 1e-6)
       << "walker M did not change with V: the walker is not sampling the disordered G0";
-#endif  // DISORDERED_G0
 }

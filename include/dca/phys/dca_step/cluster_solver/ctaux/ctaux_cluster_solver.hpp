@@ -1100,7 +1100,8 @@ auto CtauxClusterSolver<device_t, Parameters, Data, DIST>::local_G_k_w() const {
   //     the clean branch -- the per-node sign, not collect_measurements' MPI-summed one).
   func::function<std::complex<Real>, NuRNuRClusterWDmn> M_r_r_w_new(
       accumulator_.get_sign_times_M_r_w(), "M_r_r_w_new");
-  M_r_r_w_new /= accumulator_.get_accumulated_sign();
+  M_r_r_w_new /= static_cast<typename decltype(M_r_r_w_new)::this_scalar_type>(
+      accumulator_.get_accumulated_phase());
 
   // (2) r-space disorder Dyson, single config => weight 1. G_r_r_w_new is freshly default-
   //     constructed (zero-initialized), which the accumulating kernel (acc += weight*G) requires.
@@ -1117,7 +1118,8 @@ auto CtauxClusterSolver<device_t, Parameters, Data, DIST>::local_G_k_w() const {
   func::function<std::complex<double>, func::dmn_variadic<nu, nu, RDmn, w>> M_r_w_new(
       accumulator_.get_sign_times_M_r_w(), "M_r_w_new");
 
-  M_r_w_new /= accumulator_.get_accumulated_sign();
+  M_r_w_new /= static_cast<typename decltype(M_r_w_new)::this_scalar_type>(
+      accumulator_.get_accumulated_phase());
 
   math::transform::FunctionTransform<RDmn, KDmn>::execute(M_r_w_new, M_k_w_new);
   compute_G_k_w_new(M_k_w_new, G_k_w_new);

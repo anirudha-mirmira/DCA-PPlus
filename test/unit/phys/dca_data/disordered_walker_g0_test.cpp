@@ -149,9 +149,6 @@ TEST(DisorderedWalkerG0Test, ImaginaryTimeUnfoldAtZeroPotential) {
 // The two-site akima storage only exists under DISORDERED_G0; in the clean build the storage is
 // keyed by a single displacement, so this property is not defined.
 TEST(DisorderedWalkerG0Test, WalkerAkimaStoresTwoSiteG0) {
-#ifndef DISORDERED_G0
-  SUCCEED() << "two-site walker akima storage requires -DDISORDERED_G0";
-#else
   auto data = makeData();
   fillSyntheticDisorderedG0rt(*data);
 
@@ -174,7 +171,6 @@ TEST(DisorderedWalkerG0Test, WalkerAkimaStoresTwoSiteG0) {
             const double ref = data->disordered_G0_r_r_t_cl_exl(n0, r0, n1, r1, s);
             EXPECT_NEAR(a0, ref, tol) << "s=" << s << " r0=" << r0 << " r1=" << r1;
           }
-#endif  // DISORDERED_G0
 }
 
 // Chunk C: build_G0_matrix must key by absolute sites. Two vertex pairs with the SAME displacement
@@ -182,9 +178,6 @@ TEST(DisorderedWalkerG0Test, WalkerAkimaStoresTwoSiteG0) {
 // Site-resolved G0 only exists under DISORDERED_G0; the clean build collapses both pairs to their
 // shared displacement (giving identical G0), so this property is not defined there.
 TEST(DisorderedWalkerG0Test, BuildG0MatrixUsesAbsoluteSites) {
-#ifndef DISORDERED_G0
-  SUCCEED() << "site-resolved build_G0_matrix requires -DDISORDERED_G0";
-#else
   auto data = makeData();
   fillSyntheticDisorderedG0rt(*data);
 
@@ -221,5 +214,4 @@ TEST(DisorderedWalkerG0Test, BuildG0MatrixUsesAbsoluteSites) {
   dca::linalg::Matrix<Scalar, dca::linalg::CPU> G0_1b;
   g0.build_G0_matrix(cfg1, G0_1b);
   EXPECT_DOUBLE_EQ(G0_1(0, 1), G0_1b(0, 1));
-#endif  // DISORDERED_G0
 }

@@ -37,8 +37,6 @@ using McOptions = MockMcOptions<Scalar>;
 #include "dca/phys/dca_step/cluster_solver/shared_tools/accumulation/sp/sp_accumulator.hpp"
 #include "test/unit/phys/dca_step/cluster_solver/shared_tools/accumulation/accumulation_test.hpp"
 
-#ifdef DISORDERED_G0
-
 constexpr int n_bands = 1;
 constexpr int n_sites = 4;
 constexpr int n_frqs = 32;
@@ -170,13 +168,3 @@ TEST_F(SpAccumulatorDisorderTest, ValuePlacementFullMatrix) {
       }
     }
 }
-
-#else  // DISORDERED_G0
-
-TEST(SpAccumulatorDisorderTest, DisabledWithoutDisorderedG0) {
-  // gtest 1.8.0 (bundled) has no GTEST_SKIP; SUCCEED() makes this a trivially-passing placeholder
-  // when built without DISORDERED_G0 (the two-site disorder accumulator path is inactive).
-  SUCCEED() << "Built without DISORDERED_G0; two-site disorder accumulator path is inactive.";
-}
-
-#endif  // DISORDERED_G0
